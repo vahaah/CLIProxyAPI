@@ -86,6 +86,30 @@ def install_clients(client):
         destination.symlink_to(target)
 
 
+def install_tailscale_login(launch_dir, logs, start=True):
+    tailscale_app = Path("/Applications/Tailscale.app")
+    if not tailscale_app.exists():
+        return False
+    # Use Launch Services independently of the app's Start on Login helper.
+    # Opening an already-running app leaves its active VPN tunnel running.
+    label = LABEL + ".tailscale"
+    plist_path = launch_dir / (label + ".plist")
+    private_write(plist_path, plistlib.dumps({
+        "Label": label,
+        "ProgramArguments": ["/usr/bin/open", "-g", "-a", str(tailscale_app)],
+        "RunAtLoad": True,
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs / "tailscale-startup.log"),
+        "StandardErrorPath": str(logs / "tailscale-startup.log"),
+    }).decode())
+    if start:
+        domain = "gui/" + str(os.getuid())
+        registered = subprocess.run(["launchctl", "print", domain + "/" + label], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        if not registered:
+            subprocess.run(["launchctl", "bootstrap", domain, str(plist_path)], check=True)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", action="store_true", help="install an exported laptop client")
@@ -178,6 +202,7 @@ def main():
     }
     plist_path = launch_dir / (LABEL + ".plist")
     private_write(plist_path, plistlib.dumps(service).decode())
+    install_tailscale_login(launch_dir, logs, start=not args.no_start)
     if not args.no_start:
         domain = "gui/" + str(os.getuid())
         registered = subprocess.run(["launchctl", "print", domain + "/" + LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0

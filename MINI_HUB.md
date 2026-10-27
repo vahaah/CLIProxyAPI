@@ -42,6 +42,11 @@ logged in; locking the screen is fine. This user service does not run after
 logout or before login after a restart. It does not change FileVault, automatic
 login, power-loss recovery, or system-wide power settings.
 
+When `/Applications/Tailscale.app` is installed, a second user login job opens
+Tailscale in the background. This works independently of Tailscale's own
+Start on Login preference. Existing Tailscale sign-in and background Serve
+configuration are retained.
+
 ## Daily use
 
 ```sh
@@ -146,6 +151,7 @@ exercise that behavior with controlled quota signals.
 | `~/.cli-proxy-api/` | Upstream OAuth grants; private to the Mini |
 | `~/.local/share/cliproxyapi-mini/` | Installed binary, helpers, and rotating logs |
 | `~/Library/LaunchAgents/com.vahaah.cliproxyapi-mini.plist` | Per-user launchd service |
+| `~/Library/LaunchAgents/com.vahaah.cliproxyapi-mini.tailscale.plist` | Starts Tailscale at user login |
 
 Configuration files use mode `0600`; private directories use `0700`. Never commit
 these files or transfer the upstream credential directory to clients. Back
