@@ -1,0 +1,55 @@
+# Private Mini hub. install.py renders credentials outside the repository.
+config-version: 8
+server:
+  host: "127.0.0.1"
+  port: 8317
+  trusted-proxies: ["127.0.0.1", "::1"]
+  max-request-body-bytes: 67108864
+  discovery:
+    enabled: false
+  response-compression:
+    enabled: true
+    min-bytes: 1024
+management:
+  allow-remote: true
+  secret-key: __MANAGEMENT_KEY__
+  disable-control-panel: false
+  disable-auto-update-panel: true
+access:
+  api-keys: [__API_KEY__]
+oauth:
+  auth-dir: __AUTH_DIR__
+  auth-auto-refresh-workers: 4
+routing:
+  strategy: "soonest-reset-first"
+  session-affinity: true
+  session-affinity-ttl: "1h"
+  session-affinity-subagents: true
+  session-affinity-rebind-on: "quota"
+  retry:
+    request-retry: 3
+    max-retry-credentials: 0
+    max-retry-interval: 30
+  cooldown:
+    disable-cooling: false
+    save-cooldown-status: true
+requests:
+  tls-handshake-timeout-seconds: 15
+  passthrough-headers: true
+  streaming:
+    keepalive-seconds: 15
+    bootstrap-retries: 1
+upstream:
+  codex:
+    upstream-request-compression: true
+    websocket-compression: true
+    stream-bootstrap-buffering: false
+observability:
+  logs:
+    debug: false
+    logging-to-file: true
+    logs-max-total-size-mb: 128
+    error-logs-max-files: 5
+    request-log: false
+  pprof:
+    enable: false

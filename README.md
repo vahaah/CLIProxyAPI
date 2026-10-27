@@ -1,5 +1,9 @@
 # CLI Proxy API
 
+This fork includes a [personal Mac mini hub setup](MINI_HUB.md) with native
+installation, private Tailscale access, isolated CLI commands, and routing that
+prefers subscription quota windows resetting soonest.
+
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 If you want to use CLIProxyAPI on your desktop, we recommend our [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) desktop client. It provides a graphical configuration UI, automatic updates, system tray integration, and one-click start/stop for the CLIProxyAPI service.
