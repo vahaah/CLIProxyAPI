@@ -180,8 +180,11 @@ def main():
     private_write(plist_path, plistlib.dumps(service).decode())
     if not args.no_start:
         domain = "gui/" + str(os.getuid())
-        subprocess.run(["launchctl", "bootout", domain + "/" + LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["launchctl", "bootstrap", domain, str(plist_path)], check=True)
+        registered = subprocess.run(["launchctl", "print", domain + "/" + LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        if registered:
+            subprocess.run(["launchctl", "kickstart", "-k", domain + "/" + LABEL], check=True)
+        else:
+            subprocess.run(["launchctl", "bootstrap", domain, str(plist_path)], check=True)
     print(f"Installed native Mini hub. Config: {config_path}")
     print("Commands: hubctl status, hubctl login claude, hubctl login codex, claude-hub, codex-hub")
 

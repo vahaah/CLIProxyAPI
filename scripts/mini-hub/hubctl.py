@@ -136,9 +136,11 @@ def main():
         print("Copied to clipboard.")
     elif args.action in ("start", "stop", "restart"):
         domain = "gui/" + str(os.getuid())
-        if args.action in ("stop", "restart"):
+        if args.action == "restart":
+            subprocess.run(["launchctl", "kickstart", "-k", domain + "/" + LABEL], check=True)
+        elif args.action == "stop":
             subprocess.run(["launchctl", "bootout", domain + "/" + LABEL], check=True)
-        if args.action in ("start", "restart"):
+        else:
             subprocess.run(["launchctl", "bootstrap", domain, str(USER_DIR / "Library/LaunchAgents" / (LABEL + ".plist"))], check=True)
     elif args.action == "serve":
         cli = tailscale_binary()
@@ -168,7 +170,7 @@ if __name__ == "__main__":
     os.umask(0o077)
     try:
         main()
-    except (OSError, ValueError, urllib.error.URLError) as error:
+    except (OSError, ValueError, urllib.error.URLError, subprocess.CalledProcessError) as error:
         # HTTPError.__str__ contains only the status, never request headers.
         print("hubctl:", error, file=sys.stderr)
         raise SystemExit(1)
