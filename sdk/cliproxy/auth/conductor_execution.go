@@ -2243,7 +2243,7 @@ func (m *Manager) VerifyInference(ctx context.Context, id, model string) (*Auth,
 	}
 	provider := strings.ToLower(strings.TrimSpace(auth.Provider))
 	m.mu.RLock()
-	executor := m.executors[provider]
+	executor := m.executors[executorKeyFromAuth(auth)]
 	m.mu.RUnlock()
 	if executor == nil {
 		return auth, &Error{Code: "executor_not_found", Message: "executor not registered for provider", HTTPStatus: http.StatusBadRequest}

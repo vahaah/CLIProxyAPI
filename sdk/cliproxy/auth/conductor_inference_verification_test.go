@@ -93,3 +93,38 @@ func TestExecuteVerifiesOnlyCompletedClaudeMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyInferenceUsesCredentialExecutorKey(t *testing.T) {
+	for _, registerRawProvider := range []bool{false, true} {
+		t.Run(fmt.Sprintf("raw_provider_registered=%t", registerRawProvider), func(t *testing.T) {
+			ctx := context.Background()
+			manager := NewManager(nil, nil, nil)
+			auth, errRegister := manager.Register(ctx, &Auth{
+				ID: "compat-verification", Provider: "plugin-provider", Status: StatusActive,
+				Attributes: map[string]string{"compat_name": "custom", "provider_key": "custom"},
+			})
+			if errRegister != nil {
+				t.Fatal(errRegister)
+			}
+			mapped := &unauthorizedRefreshExecutor{id: "openai-compatible-custom"}
+			raw := &unauthorizedRefreshExecutor{id: "plugin-provider"}
+			manager.RegisterExecutor(mapped)
+			if registerRawProvider {
+				manager.RegisterExecutor(raw)
+			}
+
+			verified, errVerify := manager.VerifyInference(ctx, auth.ID, "custom-model")
+			if errVerify != nil {
+				t.Fatalf("mapped credential verification failed: %v", errVerify)
+			}
+			mappedCalls := mapped.StreamCalls()
+			rawCalls := raw.StreamCalls()
+			if len(mappedCalls) != 1 || mappedCalls[0] != auth.ID || len(rawCalls) != 0 {
+				t.Fatalf("executor calls = mapped %v, raw %v; want only the mapped executor for %s", mappedCalls, rawCalls, auth.ID)
+			}
+			if verified.ID != auth.ID || !verified.InferenceVerified {
+				t.Fatalf("verification result = %#v, want the mapped credential marked verified", verified)
+			}
+		})
+	}
+}
