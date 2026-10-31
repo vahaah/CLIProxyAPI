@@ -392,8 +392,12 @@ func isCompletedExecutionPayload(payload []byte) bool {
 		return true
 	}
 	if objType, _ := obj["type"].(string); strings.TrimSpace(objType) == "message" {
-		if stopReason, ok := obj["stop_reason"].(string); ok && strings.TrimSpace(stopReason) != "" {
+		stopReason, _ := obj["stop_reason"].(string)
+		switch strings.ToLower(strings.TrimSpace(stopReason)) {
+		case "end_turn", "stop_sequence", "tool_use":
 			return true
+		default:
+			return false
 		}
 	}
 	if output, ok := obj["output"].([]any); ok && len(output) > 0 && status == "" {
