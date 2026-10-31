@@ -2,9 +2,11 @@ name: pr-test-build
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   build:
@@ -23,3 +25,15 @@ jobs:
         run: |
           go build -o test-output ./cmd/server
           rm -f test-output
+      - name: Report build status
+        if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+          STATUS_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA" \
+            -f state="$BUILD_STATE" \
+            -f context="server-build" \
+            -f description="Server build result" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

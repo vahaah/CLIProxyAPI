@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +110,56 @@ func TestGetAuthStatusRejectsUnknownStateAndAcceptsCompletedState(t *testing.T) 
 	completed := performOAuthStatusRequest(t, router, "completed-state")
 	if completed.Status != "ok" || completed.Error != "" {
 		t.Fatalf("completed state response = %#v, want success", completed)
+	}
+}
+
+func TestGetAuthStatusScopesRecoveryDetailsToV8(t *testing.T) {
+	store := newOAuthSessionStore(time.Minute)
+	replaceOAuthSessionStoreForTest(t, store)
+	store.Register("completed-recovery-state", "codex")
+	store.CompleteWithAuth("completed-recovery-state", "codex-recovery.json")
+
+	handler := &Handler{}
+	router := gin.New()
+	router.GET("/v0/management/get-auth-status", handler.GetAuthStatus)
+	v8 := router.Group("/v8/management")
+	v8.Use(func(c *gin.Context) {
+		c.Set(ConfigV8ContextKey, true)
+		c.Next()
+	})
+	v8.GET("/oauth/status", handler.GetAuthStatus)
+
+	for _, test := range []struct {
+		path string
+		want map[string]any
+	}{
+		{
+			path: "/v0/management/get-auth-status",
+			want: map[string]any{"status": "ok"},
+		},
+		{
+			path: "/v8/management/oauth/status",
+			want: map[string]any{
+				"status": "ok", "auth_id": "codex-recovery.json", "saved": true,
+				"adopted": false, "recovery_stage": "credential_saved",
+			},
+		},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path+"?state=completed-recovery-state", nil)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+			}
+			var got map[string]any
+			if errDecode := json.Unmarshal(response.Body.Bytes(), &got); errDecode != nil {
+				t.Fatal(errDecode)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("status response = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }
 

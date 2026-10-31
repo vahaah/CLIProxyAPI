@@ -1222,6 +1222,44 @@ func retryRoundAvailabilityForAuth(auth *Auth, model string, now time.Time) (boo
 	return true, next
 }
 
+func hasLiveQuotaCooldown(auth *Auth, model string, now time.Time) bool {
+	if auth == nil {
+		return false
+	}
+	quotaLive := func(quota QuotaState) bool {
+		return quota.Exceeded && (quota.NextRecoverAt.IsZero() || quota.NextRecoverAt.After(now))
+	}
+	if auth.Quota.Reason == "credential_quota" && quotaLive(auth.Quota) {
+		return true
+	}
+	modelKey := canonicalModelKey(model)
+	if modelKey == "" {
+		return quotaLive(auth.Quota)
+	}
+	for stateModel, state := range auth.ModelStates {
+		if state == nil {
+			continue
+		}
+		if canonicalModelKey(stateModel) == modelKey && quotaLive(state.Quota) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTransientZeroWaitEligibility(auth *Auth, model string) bool {
+	if auth == nil {
+		return false
+	}
+	modelKey := canonicalModelKey(model)
+	if modelKey != "" && len(auth.ModelStates) > 0 {
+		if state := auth.ModelStates[modelKey]; state != nil {
+			return isTransientRateLimitResultError(state.LastError)
+		}
+	}
+	return isTransientRateLimitResultError(auth.LastError)
+}
+
 func credentialRetryRoundStateEligible(lastErr *Error, quotaExceeded bool) bool {
 	if lastErr == nil {
 		return quotaExceeded
@@ -1291,7 +1329,8 @@ func (m *Manager) closestCooldownWaitWithAttempted(providers []string, model str
 			_, wasAttempted = attempted[auth.ID]
 		}
 		coolingDisabled := m.cooldownDisabledForAuth(auth)
-		if !wasAttempted || coolingDisabled || status != http.StatusTooManyRequests {
+		transientZeroWait := !hasLiveQuotaCooldown(auth, checkModel, now) && hasTransientZeroWaitEligibility(auth, checkModel)
+		if !wasAttempted || coolingDisabled || status != http.StatusTooManyRequests || transientZeroWait {
 			if next.IsZero() {
 				return 0, true
 			}

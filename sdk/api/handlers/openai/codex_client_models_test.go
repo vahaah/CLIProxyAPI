@@ -53,8 +53,8 @@ func TestCodexClientModelsResponseMultiAgentV2FollowsConfig(t *testing.T) {
 				}
 				return
 			}
-			if !exists || value != nil {
-				t.Fatalf("multi_agent_version = %#v, want preserved null", value)
+			if !exists || value != "v2" {
+				t.Fatalf("multi_agent_version = %#v, want preserved template value v2", value)
 			}
 		})
 	}

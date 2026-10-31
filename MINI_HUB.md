@@ -1,6 +1,6 @@
 # Personal Mac mini hub
 
-This fork starts from CLIProxyAPI **v8.0.44**. The `mini-hub` branch adds
+This fork tracks CLIProxyAPI **v8.0.48**. The `mini-hub` branch adds
 `soonest-reset-first` routing and a native macOS installer. Upstream remains the
 `upstream` remote; the unmodified upstream branch is `main`.
 

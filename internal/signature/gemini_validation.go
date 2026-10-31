@@ -108,12 +108,9 @@ type GeminiThoughtSignatureValidationOptions struct {
 type GeminiThoughtSignatureEnvelope string
 
 const (
-	GeminiThoughtSignatureEnvelopeUnknown GeminiThoughtSignatureEnvelope = "unknown"
-	// GeminiThoughtSignatureEnvelopeProtobufField2 is the only replay-safe Gemini
-	// envelope. The repeated field-1 form emitted by Gemini 2.5 is no longer
-	// recognized: those models are out of scope, and their signatures now fall
-	// through to the bypass sentinel like any other unknown envelope.
+	GeminiThoughtSignatureEnvelopeUnknown        GeminiThoughtSignatureEnvelope = "unknown"
 	GeminiThoughtSignatureEnvelopeProtobufField2 GeminiThoughtSignatureEnvelope = "protobuf_field_2"
+	GeminiThoughtSignatureEnvelopeBareTink       GeminiThoughtSignatureEnvelope = "bare_tink"
 	GeminiThoughtSignatureEnvelopeASCIIUUID      GeminiThoughtSignatureEnvelope = "ascii_uuid"
 )
 
@@ -450,6 +447,9 @@ func classifyGeminiThoughtSignatureEnvelope(decoded []byte) (GeminiThoughtSignat
 	if isGeminiField2Envelope(decoded) {
 		return GeminiThoughtSignatureEnvelopeProtobufField2, true
 	}
+	if isGeminiBareTinkEnvelope(decoded) {
+		return GeminiThoughtSignatureEnvelopeBareTink, true
+	}
 	return GeminiThoughtSignatureEnvelopeUnknown, false
 }
 
@@ -459,12 +459,47 @@ func isGeminiField2Envelope(decoded []byte) bool {
 }
 
 func inspectGeminiEnvelope(decoded []byte, envelope GeminiThoughtSignatureEnvelope) (recordCount int, opaquePayloadLen int) {
-	if envelope == GeminiThoughtSignatureEnvelopeProtobufField2 {
+	switch envelope {
+	case GeminiThoughtSignatureEnvelopeProtobufField2:
 		if info, ok := inspectGeminiField2Envelope(decoded); ok {
 			return info.RecordCount, info.OpaquePayloadLen
 		}
+	case GeminiThoughtSignatureEnvelopeBareTink:
+		if isGeminiBareTinkEnvelope(decoded) {
+			return 1, len(decoded)
+		}
 	}
 	return 0, 0
+}
+
+const geminiBareTinkMinLen = 1 + 4 + 16
+
+var geminiVertexBareTinkKeyIDs = [][4]byte{
+	{0x8f, 0x3d, 0x6b, 0x5f},
+}
+
+func isGeminiBareTinkEnvelope(decoded []byte) bool {
+	if len(decoded) < geminiBareTinkMinLen || decoded[0] != 0x01 {
+		return false
+	}
+	keyID := [4]byte(decoded[1:5])
+	for _, known := range geminiVertexBareTinkKeyIDs {
+		if keyID == known {
+			return true
+		}
+	}
+	return false
+}
+
+// IsGeminiVertexBareTinkSignature reports whether rawSignature is a Vertex AI
+// bare-Tink thought signature. Callers sending to Gemini endpoints other than
+// Vertex AI must treat such signatures as incompatible.
+func IsGeminiVertexBareTinkSignature(rawSignature string) bool {
+	info, err := InspectGeminiThoughtSignature(
+		SignaturePayloadWithoutProviderPrefix(rawSignature),
+		GeminiThoughtSignatureValidationOptions{RequireKnownEnvelope: true},
+	)
+	return err == nil && info.Envelope == GeminiThoughtSignatureEnvelopeBareTink
 }
 
 type geminiEnvelopeInfo struct {

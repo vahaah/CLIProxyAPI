@@ -7,22 +7,11 @@ const (
 	ABIVersion uint32 = 1
 	// SchemaVersion tracks the RPC JSON contract exchanged at plugin.register.
 	// Version 2 adds request lifecycle completion and active request termination.
-	// Version 3 omits OriginalRequest/RequestBody on payload stream chunks
-	// (ChunkIndex >= 0); those fields remain on StreamChunkHeaderInitIndex only.
 	// Plugins that still need per-chunk request bodies should keep schema_version < 3.
-	// Version 4 adds upstream WebSocket response event observation.
-	// Version 5 omits HistoryChunks on payload stream chunks (ChunkIndex >= 0);
-	// those fields remain on StreamChunkHeaderInitIndex only. Plugins that still need
-	// per-chunk history chunks should keep schema_version < 5.
-	// Version 6 preserves raw JSON bodies for plugin management responses.
+	// Plugins that still need per-chunk history chunks should keep schema_version < 5.
 	// Plugins that still require HTML entity escaping on JSON response strings
 	// should keep schema_version < 6.
-	// Version 7 lets request interceptors opt out of receiving the request body
-	// per phase via request_interceptor_omit_body_before/after capabilities; the
-	// host then omits RequestInterceptRequest.Body for that phase instead of
-	// cloning and Base64-encoding the full payload. Plugins that declare the
-	// flags on schema_version < 7 (or do not declare them) still receive it.
-	SchemaVersion uint32 = 7
+	SchemaVersion uint32 = 9
 	// SchemaVersionStreamChunkOmitRequestBody is the first schema version that omits
 	// request bodies on payload stream-chunk interceptor calls.
 	SchemaVersionStreamChunkOmitRequestBody uint32 = 3
@@ -38,6 +27,15 @@ const (
 	// SchemaVersionRequestInterceptorOmitBody is the first schema version where
 	// request interceptors may opt out of receiving the request body per phase.
 	SchemaVersionRequestInterceptorOmitBody uint32 = 7
+	// SchemaVersionFrontendAuthOmitBody is the first schema version where
+	// frontend auth providers may opt out of receiving the request body.
+	SchemaVersionFrontendAuthOmitBody uint32 = 7
+	// SchemaVersionRequestInterceptorBodyPatch is the first schema version where
+	// request interceptors may opt into raw request body delivery and byte-range patching.
+	SchemaVersionRequestInterceptorBodyPatch uint32 = 8
+	// SchemaVersionMultiProviderModels is the first schema version where model
+	// registration responses may publish models for multiple providers via Registrations.
+	SchemaVersionMultiProviderModels uint32 = 9
 )
 
 const (
@@ -74,6 +72,8 @@ const (
 	MethodRequestNormalize       = "request.normalize"
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
+	MethodRequestPatchBodyBefore = "request.patch_body_before"
+	MethodRequestPatchBodyAfter  = "request.patch_body_after"
 	MethodRequestComplete        = "request.complete"
 
 	MethodResponseTranslate            = "response.translate"

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -121,6 +122,13 @@ type responseCompressionCommitWriter struct {
 	committed bool
 }
 
+func (w *responseCompressionCommitWriter) Unwrap() http.ResponseWriter {
+	if w == nil {
+		return nil
+	}
+	return w.ResponseWriter
+}
+
 func (w *responseCompressionCommitWriter) mergeVary() {
 	if !w.committed {
 		appendCompressionVary(w.Header())
@@ -157,6 +165,37 @@ func (w *responseCompressionCommitWriter) FlushError() error {
 type responseCompressor interface {
 	io.WriteCloser
 	Flush() error
+	Reset(io.Writer)
+}
+
+type responseCompressorPool interface {
+	Get() any
+	Put(any)
+}
+
+var responseCompressorPools = map[string]responseCompressorPool{
+	"zstd": &sync.Pool{New: func() any {
+		encoder, errNewWriter := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(1<<20), zstd.WithLowerEncoderMem(true))
+		if errNewWriter != nil {
+			log.Errorf("create response compression encoder: %v", errNewWriter)
+			return nil
+		}
+		return encoder
+	}},
+	"gzip": &sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }},
+}
+
+func newResponseCompressor(encoding string, dst io.Writer) responseCompressor {
+	pool := responseCompressorPools[encoding]
+	if pool == nil {
+		return nil
+	}
+	compressor, _ := pool.Get().(responseCompressor)
+	if compressor == nil {
+		return nil
+	}
+	compressor.Reset(dst)
+	return compressor
 }
 
 // responseCompressionWriter keeps headers uncommitted until the encoding is known.
@@ -172,6 +211,13 @@ type responseCompressionWriter struct {
 	written    bool
 	size       int
 	status     int
+}
+
+func (w *responseCompressionWriter) Unwrap() http.ResponseWriter {
+	if w == nil {
+		return nil
+	}
+	return w.ResponseWriter
 }
 
 func (w *responseCompressionWriter) Written() bool {
@@ -293,17 +339,10 @@ func (w *responseCompressionWriter) decide(force bool, size int) {
 			return
 		}
 	}
-	var compressor responseCompressor
-	if w.encoding == "gzip" {
-		compressor = gzip.NewWriter(w.ResponseWriter)
-	} else {
-		encoder, errNewWriter := zstd.NewWriter(w.ResponseWriter, zstd.WithEncoderConcurrency(1))
-		if errNewWriter != nil {
-			log.Errorf("create response compression encoder: %v", errNewWriter)
-			w.decided = true
-			return
-		}
-		compressor = encoder
+	compressor := newResponseCompressor(w.encoding, w.ResponseWriter)
+	if compressor == nil {
+		w.decided = true
+		return
 	}
 	w.compressor = compressor
 	w.decided = true
@@ -358,6 +397,12 @@ func (w *responseCompressionWriter) finish() {
 			} else {
 				log.Errorf("close response compression encoder: %v", errClose)
 			}
+		}
+		w.compressor.Reset(io.Discard)
+		responseCompressorPools[w.encoding].Put(w.compressor)
+		w.compressor = nil
+		if w.writeErr == nil {
+			w.writeErr = io.ErrClosedPipe
 		}
 	}
 }

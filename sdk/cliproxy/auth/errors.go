@@ -38,6 +38,15 @@ const ErrorCodeStreamTruncated = "stream_truncated"
 
 const streamTruncatedErrorCode = ErrorCodeStreamTruncated
 
+// ErrorCodeTransientRateLimit marks a transient per-model capacity or
+// admission 429 (for example a Codex turn_rate_limit_exceeded rejection).
+// The public status stays 429, but the credential quota is not exhausted:
+// only the reporting model cools until the provider retry hint, without
+// quota labelling or quota exponential backoff.
+const ErrorCodeTransientRateLimit = "transient_rate_limit"
+
+const transientRateLimitErrorCode = ErrorCodeTransientRateLimit
+
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {
 	// Code is a short machine readable identifier.
@@ -333,6 +342,172 @@ func (e *authUnavailableError) Headers() http.Header {
 		return nil
 	}
 	return safeRetryAfterHeader(e.retryAfter)
+}
+
+type trustedRetryAfterError struct {
+	cause    error
+	deadline time.Time
+}
+
+func trustedRetryAfterHint(err error) *time.Duration {
+	if trusted := trustedRetryAfterFromError(err); trusted != nil {
+		return trusted
+	}
+	type retryAfterProvider interface {
+		RetryAfter() *time.Duration
+	}
+	var rap retryAfterProvider
+	if !errors.As(err, &rap) || rap == nil {
+		return nil
+	}
+	retryAfter := rap.RetryAfter()
+	if retryAfter == nil {
+		return nil
+	}
+	value := *retryAfter
+	return &value
+}
+
+func withTrustedRetryAfter(err error, retryAfter *time.Duration) error {
+	if err == nil || retryAfter == nil || *retryAfter <= 0 {
+		return err
+	}
+	if _, ok := err.(*upstreamExecutionAttemptError); ok {
+		return markUpstreamExecutionAttempt(withTrustedRetryAfter(unwrapUpstreamExecutionAttempt(err), retryAfter))
+	}
+	if bootstrap, ok := err.(*streamBootstrapError); ok && bootstrap != nil {
+		wrapped := withTrustedRetryAfter(bootstrap.cause, retryAfter)
+		if wrapped == bootstrap.cause {
+			return err
+		}
+		copyBootstrap := *bootstrap
+		copyBootstrap.cause = wrapped
+		*bootstrap = copyBootstrap
+		return bootstrap
+	}
+	if requestStop, ok := err.(requestStopError); ok {
+		wrapped := withTrustedRetryAfter(requestStop.error, retryAfter)
+		if wrapped == requestStop.error {
+			return err
+		}
+		return requestStopError{error: wrapped}
+	}
+	var existing *trustedRetryAfterError
+	if errors.As(err, &existing) && existing != nil {
+		return err
+	}
+	return &trustedRetryAfterError{cause: err, deadline: time.Now().Add(*retryAfter)}
+}
+
+func annotateTrustedRetryAfterByHint(err error) error {
+	if err == nil {
+		return err
+	}
+	return withTrustedRetryAfter(err, trustedRetryAfterHint(err))
+}
+
+func (e *trustedRetryAfterError) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *trustedRetryAfterError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *trustedRetryAfterError) As(target any) bool {
+	if e == nil {
+		return false
+	}
+	if t, ok := target.(**Error); ok {
+		var base *Error
+		if errors.As(e.cause, &base) && base != nil {
+			*t = base
+			return true
+		}
+	}
+	return false
+}
+
+func (e *trustedRetryAfterError) StatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return statusCodeFromError(e.cause)
+}
+
+func (e *trustedRetryAfterError) RetryAfter() *time.Duration {
+	if e == nil || e.deadline.IsZero() {
+		return nil
+	}
+	remaining := time.Until(e.deadline)
+	return &remaining
+}
+
+// HasTrustedRetryDeadline reports whether err carries a locally trusted
+// recovery deadline, even after that deadline has passed. Header writers
+// use it to keep a stale raw upstream Retry-After from resurfacing.
+func HasTrustedRetryDeadline(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exhausted *homeRetryRoundExhaustedError
+	if errors.As(err, &exhausted) && exhausted != nil {
+		return true
+	}
+	var unavailable *authUnavailableError
+	if errors.As(err, &unavailable) && unavailable != nil && unavailable.retryAfter > 0 {
+		return true
+	}
+	var cooldown *modelCooldownError
+	if errors.As(err, &cooldown) && cooldown != nil && cooldown.resetIn > 0 {
+		return true
+	}
+	if SafeResponseHeaders(err).Get("Retry-After") != "" {
+		return true
+	}
+	var trusted *trustedRetryAfterError
+	return errors.As(err, &trusted) && trusted != nil && !trusted.deadline.IsZero()
+}
+
+func trustedRetryAfterFromError(err error) *time.Duration {
+	if err == nil {
+		return nil
+	}
+	var trusted *trustedRetryAfterError
+	if errors.As(err, &trusted) && trusted != nil {
+		if remaining := trusted.RetryAfter(); remaining != nil && *remaining > 0 {
+			return remaining
+		}
+	}
+	return nil
+}
+
+// Headers preserves any upstream response headers the wrapped error
+// carries (for example a Codex websocket failure) so header passthrough
+// keeps working; the trusted deadline still outranks them on write.
+func (e *trustedRetryAfterError) Headers() http.Header {
+	if e == nil || e.cause == nil {
+		return nil
+	}
+	var carrier interface{ Headers() http.Header }
+	if errors.As(e.cause, &carrier) && carrier != nil {
+		return carrier.Headers()
+	}
+	return nil
+}
+
+// SafeResponseHeaders exposes only the locally trusted cooldown deadline.
+func (e *trustedRetryAfterError) SafeResponseHeaders() http.Header {
+	if e == nil || e.deadline.IsZero() {
+		return nil
+	}
+	return safeRetryAfterHeader(time.Until(e.deadline))
 }
 
 // WithCause wraps an *Error with an underlying cause without changing the Error struct layout.
