@@ -1115,6 +1115,7 @@ func (b *StreamUsageBuffer) observeGeminiFamilyStream(line []byte, allowResponse
 	root := gjson.Parse(unsafeBytesToString(payload))
 	var (
 		node           gjson.Result
+		nestedUsage    gjson.Result
 		candidatesNode gjson.Result
 		predsNode      gjson.Result
 	)
@@ -1133,8 +1134,8 @@ func (b *StreamUsageBuffer) observeGeminiFamilyStream(line []byte, allowResponse
 				val.ForEach(func(rk, rv gjson.Result) bool {
 					switch rk.String() {
 					case "usageMetadata", "usage_metadata":
-						if !node.Exists() {
-							node = rv
+						if !nestedUsage.Exists() {
+							nestedUsage = rv
 						}
 					case "candidates":
 						if !candidatesNode.Exists() {
@@ -1147,6 +1148,9 @@ func (b *StreamUsageBuffer) observeGeminiFamilyStream(line []byte, allowResponse
 		}
 		return true
 	})
+	if nestedUsage.Exists() {
+		node = nestedUsage
+	}
 	if candidatesNode.Exists() || predsNode.Exists() {
 		var artifactDetail usage.Detail
 		applyGeminiNodesArtifactsWithCounter(&artifactDetail, candidatesNode, predsNode, &b.geminiCallCounter)
