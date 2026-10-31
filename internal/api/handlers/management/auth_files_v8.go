@@ -329,6 +329,10 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 		if provider == "" {
 			provider = strings.TrimSpace(targetAuth.Provider)
 		}
+		if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "targeted recovery is only supported for codex"})
+			return
+		}
 		targetAccountID := ""
 		if targetAuth.Metadata != nil {
 			targetAccountID, _ = targetAuth.Metadata["account_id"].(string)
