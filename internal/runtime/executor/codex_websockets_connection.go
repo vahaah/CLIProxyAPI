@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,6 +21,7 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/net/proxy"
 )
@@ -127,6 +130,38 @@ func mapCodexWebsocketReadError(err error) error {
 		}}
 	}
 	return err
+}
+
+func codexWebsocketTurnTransportError(err error) error {
+	if err == nil || cliproxyexecutor.IsUpstreamWebsocketTurnError(err) {
+		return err
+	}
+	var status interface{ StatusCode() int }
+	if errors.As(err, &status) && status.StatusCode() != 0 {
+		return err
+	}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		if closeErr.Code != websocket.CloseAbnormalClosure {
+			return err
+		}
+	} else if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) &&
+		!errors.Is(err, net.ErrClosed) && !errors.Is(err, io.ErrClosedPipe) &&
+		!errors.Is(err, syscall.ECONNRESET) && !errors.Is(err, syscall.ECONNABORTED) &&
+		!errors.Is(err, syscall.EPIPE) {
+		return err
+	}
+	return &cliproxyexecutor.UpstreamWebsocketTurnError{Cause: err}
+}
+
+func codexWebsocketTurnEventID(err error, payload []byte) error {
+	var turnErr *cliproxyexecutor.UpstreamWebsocketTurnError
+	if !errors.As(err, &turnErr) || turnErr.EventID != "" {
+		return err
+	}
+	withID := *turnErr
+	withID.EventID = gjson.GetBytes(payload, "event_id").String()
+	return &withID
 }
 
 func normalizeCodexWebsocketParallelToolCalls(body []byte, headers http.Header) []byte {

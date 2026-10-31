@@ -7,6 +7,7 @@ import (
 )
 
 func TestCodexConfigurationUpdateCapability(t *testing.T) {
+	const incapableModelID = "gpt-5.6-luna"
 	for _, tier := range []struct {
 		name    string
 		models  func() []*ModelInfo
@@ -24,13 +25,13 @@ func TestCodexConfigurationUpdateCapability(t *testing.T) {
 					byID[info.ID] = info
 				}
 			}
-			for _, id := range append([]string{"gpt-5.5"}, tier.capable...) {
+			for _, id := range append([]string{incapableModelID}, tier.capable...) {
 				info := byID[id]
 				if info == nil {
 					t.Errorf("%s is missing", id)
 					continue
 				}
-				want := id != "gpt-5.5"
+				want := id != incapableModelID
 				if info.SupportConfigurationUpdate != want {
 					t.Errorf("%s configuration_update = %v, want %v", id, info.SupportConfigurationUpdate, want)
 				}

@@ -72,10 +72,7 @@ func TestModelsMultiAgentClientConfigAndReload(t *testing.T) {
 						if entry["slug"] != modelID {
 							continue
 						}
-						var want any
-						if tc.want {
-							want = "v2"
-						}
+						want := any("v2")
 						if value, present := entry["multi_agent_version"]; !present || value != want {
 							t.Fatalf("multi_agent_version = %#v (present %t), want %#v", value, present, want)
 						}

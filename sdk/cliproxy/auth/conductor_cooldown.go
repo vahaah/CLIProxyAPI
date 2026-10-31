@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -104,6 +105,13 @@ func nextTransientErrorRetryAfter(now time.Time) time.Time {
 
 func recoverableFailureRetryAfter(now time.Time, disableCooling bool) time.Time {
 	return recoverableFailureRetryAfterWithHint(now, nil, disableCooling)
+}
+
+func transientRateLimitRetryAfter(now time.Time, retryAfter *time.Duration, disableCooling bool) time.Time {
+	if retryAfter != nil && *retryAfter == 0 {
+		return time.Time{}
+	}
+	return recoverableFailureRetryAfterWithHint(now, retryAfter, disableCooling)
 }
 
 func recoverableFailureRetryAfterWithHint(now time.Time, retryAfter *time.Duration, disableCooling bool) time.Time {
@@ -957,6 +965,10 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			isAuthActiveCooldown(auth, now) && auth.cooldownRecordedSeq > 0 && result.ExecutionSeq <= auth.cooldownRecordedSeq
 
 		if result.Success {
+			if result.CompletedResponse && !result.SkipQuotaObservation && !wasTerminalUnauthorized && !(auth.Quota.Reason == "credential_quota" && auth.Quota.NextRecoverAt.After(now)) && !retainModelCooldown && !retainAuthCooldown {
+				auth.InferenceVerified = true
+				auth.LastInferenceVerifiedAt = now
+			}
 			if wasTerminalUnauthorized {
 				if modelKey != "" {
 					state := ensureModelState(auth, modelKey)
@@ -1066,6 +1078,16 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						} else {
 							state.NextRetryAfter = now.Add(30 * time.Minute)
 						}
+					} else if isTransientRateLimitResultError(result.Error) && statusCode == http.StatusTooManyRequests {
+						next := transientRateLimitRetryAfter(now, result.RetryAfter, disableCooling)
+						if !next.IsZero() && state.Quota.Exceeded && state.Quota.NextRecoverAt.After(next) {
+							next = state.Quota.NextRecoverAt
+						}
+						if next.IsZero() && state.Quota.Exceeded && state.Quota.NextRecoverAt.After(now) {
+							next = state.Quota.NextRecoverAt
+						}
+						state.NextRetryAfter = next
+						state.Unavailable = !next.IsZero()
 					} else {
 						switch statusCode {
 						case 401, 402, 403:
@@ -1943,6 +1965,8 @@ func resultErrorFromError(err error) *Error {
 		// Preserve the local truncation classification alongside the public
 		// 502 status so MarkResult can skip credential cooldown.
 		resultErr.Code = streamTruncatedErrorCode
+	case isTransientRateLimitError(err):
+		resultErr.Code = transientRateLimitErrorCode
 	case isExplicitModelNotFoundError(err, ""):
 		if resultErr.Code == "" || resultErr.Code == requestScopedErrorCode {
 			resultErr.Code = "model_not_found"
@@ -2176,7 +2200,7 @@ func isUnauthorizedError(err error) bool {
 		return true
 	}
 	raw := strings.ToLower(err.Error())
-	return strings.Contains(raw, "status 401") || strings.Contains(raw, "401 unauthorized")
+	return strings.Contains(raw, "status 401") || strings.Contains(raw, "401 unauthorized") || strings.Contains(raw, "(401)")
 }
 
 func hasUnauthorizedAuthFailure(auth *Auth) bool {
@@ -2215,6 +2239,169 @@ func HasDisabledInvalidGrantFailure(auth *Auth) bool {
 	return hasDisabledInvalidGrantFailure(auth)
 }
 
+var (
+	renewalURLPattern          = regexp.MustCompile(`(?i)https?://[^\s"'<>\\]+`)
+	renewalJWTPattern          = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?\b`)
+	renewalSecretKVPattern     = regexp.MustCompile(`(?i)\b(access_token|refresh_token|id_token|client_secret|code_verifier|code_challenge|authorization)\s*([=:]|"\s*:\s*")\s*(?:(?:bearer|basic|token)\s+)?([^\s"&',}\\]+)`)
+	renewalOAuthParamPatten    = regexp.MustCompile(`(?i)(?:[?&]|\b)(code|state)=([^\s"&',}\\]+)`)
+	renewalEscapedParamPattern = regexp.MustCompile(`(?i)(code|state)%3[dD]([^\s"&',}\\%]+)`)
+	renewalJSONStatePattern    = regexp.MustCompile(`(?i)("state"\s*:\s*)"([^"]*)(?:"|$)`)
+	renewalJSONCodePattern     = regexp.MustCompile(`(?i)("code"\s*:\s*)"([^"]*)(?:"|$)`)
+	renewalBearerPattern       = regexp.MustCompile(`(?i)\bBearer\s+[^\s"',}\\]+`)
+)
+
+func isKnownSafeOAuthErrorCode(code string) bool {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "refresh_token_reused",
+		"refresh_token_expired",
+		"refresh_token_invalidated",
+		"token_revoked",
+		"invalid_grant",
+		"invalid_client",
+		"invalid_request",
+		"invalid_request_error",
+		"unauthorized",
+		"rate_limit_exceeded",
+		"insufficient_quota",
+		"billing_hard_limit_reached",
+		"account_deactivated",
+		"context_length_exceeded",
+		"server_error",
+		"service_unavailable",
+		"bad_gateway",
+		"model_not_found":
+		return true
+	default:
+		return false
+	}
+}
+
+// SanitizeRenewalMessage strips URLs, bearer tokens, JWTs, OAuth codes/states, and secret fields from diagnostic messages.
+func SanitizeRenewalMessage(raw string) string {
+	return sanitizeRenewalMessage(raw)
+}
+
+func redactRenewalPatterns(in string) string {
+	out := renewalURLPattern.ReplaceAllString(in, "[redacted-url]")
+	out = renewalJWTPattern.ReplaceAllString(out, "[redacted-token]")
+	out = renewalBearerPattern.ReplaceAllString(out, "Bearer [redacted]")
+	out = renewalSecretKVPattern.ReplaceAllString(out, "${1}=[redacted]")
+	out = renewalOAuthParamPatten.ReplaceAllString(out, "${1}=[redacted]")
+	out = renewalEscapedParamPattern.ReplaceAllString(out, "${1}=[redacted]")
+	out = renewalJSONStatePattern.ReplaceAllString(out, `${1}"[redacted]"`)
+	out = renewalJSONCodePattern.ReplaceAllStringFunc(out, func(match string) string {
+		sub := renewalJSONCodePattern.FindStringSubmatch(match)
+		if len(sub) == 3 && isKnownSafeOAuthErrorCode(sub[2]) && strings.HasSuffix(match, `"`) {
+			return match
+		}
+		if len(sub) >= 2 {
+			return sub[1] + `"[redacted]"`
+		}
+		return `"code":"[redacted]"`
+	})
+	return out
+}
+
+func sanitizeRenewalMessage(raw string) string {
+	preRedacted := redactRenewalPatterns(raw)
+	out := internallogging.SafeDiagnosticForLog(preRedacted)
+	return redactRenewalPatterns(out)
+}
+
+func isTerminalRefreshGrantMessage(message string) bool {
+	lower := strings.ToLower(message)
+	for _, token := range []string{
+		"refresh_token_reused",
+		"refresh_token_expired",
+		"refresh_token_invalidated",
+		"token_revoked",
+		"invalid_client",
+	} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTerminalRefreshError(auth *Auth, err error) bool {
+	if err == nil {
+		return false
+	}
+	var partErr interface {
+		OuterRefreshError() error
+		SIWCRefreshError() error
+	}
+	if errors.As(err, &partErr) && partErr != nil {
+		return isTerminalRefreshError(auth, partErr.OuterRefreshError()) ||
+			isTerminalRefreshError(auth, partErr.SIWCRefreshError())
+	}
+	if isUnauthorizedError(err) || isTerminalRefreshGrantMessage(err.Error()) {
+		return true
+	}
+	if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") && isInvalidGrantError(err) {
+		return true
+	}
+	return false
+}
+
+func terminalRefreshErrorCode(message string, statusCode int) string {
+	lower := strings.ToLower(message)
+	for _, code := range []string{
+		"refresh_token_reused",
+		"refresh_token_expired",
+		"refresh_token_invalidated",
+		"token_revoked",
+		"invalid_client",
+	} {
+		if strings.Contains(lower, code) {
+			return code
+		}
+	}
+	if isInvalidGrantErrorMessage(lower) {
+		return "invalid_grant"
+	}
+	if statusCode == http.StatusUnauthorized {
+		return "unauthorized"
+	}
+	return "refresh_failed"
+}
+
+func sanitizeRenewalError(auth *Auth, err error) *Error {
+	if err == nil {
+		return nil
+	}
+	var partErr interface {
+		OuterRefreshError() error
+		SIWCRefreshError() error
+	}
+	if errors.As(err, &partErr) && partErr != nil {
+		outerErr := partErr.OuterRefreshError()
+		siwcErr := partErr.SIWCRefreshError()
+		if outerErr != nil && isTerminalRefreshError(auth, outerErr) {
+			err = outerErr
+		} else if siwcErr != nil && isTerminalRefreshError(auth, siwcErr) {
+			err = siwcErr
+		}
+	}
+	raw := err.Error()
+	statusCode := statusCodeFromError(err)
+	if statusCode == 0 {
+		if isUnauthorizedError(err) {
+			statusCode = http.StatusUnauthorized
+		} else if isInvalidGrantError(err) || isTerminalRefreshGrantMessage(raw) {
+			statusCode = http.StatusBadRequest
+		}
+	}
+	terminal := isTerminalRefreshError(auth, err)
+	return &Error{
+		Code:       terminalRefreshErrorCode(raw, statusCode),
+		Message:    sanitizeRenewalMessage(raw),
+		HTTPStatus: statusCode,
+		Retryable:  !terminal,
+	}
+}
+
 func refreshErrorFromError(err error) *Error {
 	if err == nil {
 		return nil
@@ -2223,7 +2410,7 @@ func refreshErrorFromError(err error) *Error {
 	if statusCode == 0 && isUnauthorizedError(err) {
 		statusCode = http.StatusUnauthorized
 	}
-	authErr := &Error{Message: err.Error(), HTTPStatus: statusCode}
+	authErr := &Error{Message: sanitizeRenewalMessage(err.Error()), HTTPStatus: statusCode}
 	if statusCode == http.StatusUnauthorized {
 		authErr.Code = "unauthorized"
 		authErr.Retryable = false
@@ -2235,11 +2422,24 @@ func retryAfterFromError(err error) *time.Duration {
 	if err == nil {
 		return nil
 	}
+	var exhausted *homeRetryRoundExhaustedError
+	if errors.As(err, &exhausted) && exhausted != nil {
+		return exhausted.RetryAfter()
+	}
+	if trusted := trustedRetryAfterFromError(err); trusted != nil {
+		return trusted
+	}
 	type retryAfterProvider interface {
 		RetryAfter() *time.Duration
 	}
 	var rap retryAfterProvider
 	if !errors.As(err, &rap) || rap == nil {
+		return nil
+	}
+	if _, isTrusted := rap.(*trustedRetryAfterError); isTrusted {
+		if inner := errors.Unwrap(err); inner != nil {
+			return retryAfterFromError(inner)
+		}
 		return nil
 	}
 	retryAfter := rap.RetryAfter()
@@ -2248,6 +2448,28 @@ func retryAfterFromError(err error) *time.Duration {
 	}
 	value := *retryAfter
 	return &value
+}
+
+func isTransientRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isCredentialScopedError(err) {
+		return false
+	}
+	transientErr, ok := errors.AsType[cliproxyexecutor.TransientRateLimitError](err)
+	if ok && transientErr != nil && transientErr.IsTransientRateLimit() {
+		return true
+	}
+	var authErr *Error
+	if errors.As(err, &authErr) && authErr != nil && authErr.Code == transientRateLimitErrorCode {
+		return true
+	}
+	return false
+}
+
+func isTransientRateLimitResultError(err *Error) bool {
+	return err != nil && err.Code == transientRateLimitErrorCode
 }
 
 func isCredentialScopedError(err error) bool {
@@ -2732,7 +2954,17 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		}
 	}
 	statusCode := statusCodeFromResult(resultErr)
-	if isCloudflareChallengeResultError(resultErr) {
+	if isTransientRateLimitResultError(resultErr) && statusCode == http.StatusTooManyRequests {
+		next := transientRateLimitRetryAfter(now, retryAfter, disableCooling)
+		if !next.IsZero() && auth.Quota.Exceeded && auth.Quota.NextRecoverAt.After(next) {
+			next = auth.Quota.NextRecoverAt
+		}
+		if next.IsZero() && auth.Quota.Exceeded && auth.Quota.NextRecoverAt.After(now) {
+			next = auth.Quota.NextRecoverAt
+		}
+		auth.NextRetryAfter = next
+		auth.Unavailable = !next.IsZero()
+	} else if isCloudflareChallengeResultError(resultErr) {
 		auth.StatusMessage = "cloudflare challenge"
 		next, backoffLevel := nextCloudflareCooldown(auth.Quota.BackoffLevel, disableCooling, now)
 		applyCooldownFields(&auth.Quota, QuotaState{

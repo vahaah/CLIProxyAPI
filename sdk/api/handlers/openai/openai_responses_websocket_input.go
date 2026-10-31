@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -22,16 +23,27 @@ import (
 // responsesLocalInterrupt cancels an in-flight HTTP turn. A websocket upstream
 // does not use it; that interrupt is written to the existing socket instead.
 type responsesLocalInterrupt struct {
-	mu     sync.Mutex
-	active bool
-	frames chan []byte
+	mu           sync.Mutex
+	active       bool
+	wsTurnActive bool
+	frames       chan []byte
 }
 
 func newResponsesLocalInterrupt() *responsesLocalInterrupt {
 	return &responsesLocalInterrupt{frames: make(chan []byte, 1)}
 }
 
-func (s *responsesLocalInterrupt) begin() {
+func (s *responsesLocalInterrupt) begin(websocketOwned bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.active = true
+	s.wsTurnActive = websocketOwned
+	s.mu.Unlock()
+}
+
+func (s *responsesLocalInterrupt) reactivate() {
 	if s == nil {
 		return
 	}
@@ -40,17 +52,39 @@ func (s *responsesLocalInterrupt) begin() {
 	s.mu.Unlock()
 }
 
-func (s *responsesLocalInterrupt) end() {
+func (s *responsesLocalInterrupt) endWebsocketTurn() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.wsTurnActive = false
+	s.mu.Unlock()
+}
+
+func (s *responsesLocalInterrupt) stopClaims() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	s.active = false
-	select {
-	case <-s.frames:
-	default:
-	}
 	s.mu.Unlock()
+}
+
+func (s *responsesLocalInterrupt) end() {
+	s.stopClaims()
+}
+
+func (s *responsesLocalInterrupt) deactivate() {
+	s.stopClaims()
+}
+
+func (s *responsesLocalInterrupt) isActive() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active
 }
 
 func (s *responsesLocalInterrupt) deliver(payload []byte) bool {
@@ -59,14 +93,15 @@ func (s *responsesLocalInterrupt) deliver(payload []byte) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.active {
+	if !s.active || s.wsTurnActive {
 		return false
 	}
 	select {
 	case s.frames <- bytes.Clone(payload):
+		return true
 	default:
+		return false
 	}
-	return true
 }
 
 func (s *responsesLocalInterrupt) framesChan() <-chan []byte {
@@ -76,10 +111,22 @@ func (s *responsesLocalInterrupt) framesChan() <-chan []byte {
 	return s.frames
 }
 
+func (s *responsesLocalInterrupt) takeClaimed() []byte {
+	if s == nil {
+		return nil
+	}
+	select {
+	case frame := <-s.frames:
+		return frame
+	default:
+		return nil
+	}
+}
+
 // readResponsesWebsocketInput is the only downstream reader. Interrupts are
 // handled immediately so they are not queued behind an active response.
 // The bounded queue backpressures clients instead of retaining unlimited input.
-func readResponsesWebsocketInput(ctx context.Context, cancel context.CancelCauseFunc, conn *websocket.Conn, interrupt func([]byte) error, local *responsesLocalInterrupt, writer *responsesWebsocketWriter, timeline websocketTimelineAppender) (<-chan cliproxyexecutor.WebsocketInput, <-chan struct{}) {
+func readResponsesWebsocketInput(ctx context.Context, cancel context.CancelCauseFunc, conn *websocket.Conn, interrupt func([]byte) error, local *responsesLocalInterrupt, writer *responsesWebsocketWriter, timeline websocketTimelineAppender, epoch *atomic.Uint64) (<-chan cliproxyexecutor.WebsocketInput, <-chan struct{}) {
 	input := make(chan cliproxyexecutor.WebsocketInput, 16)
 	done := make(chan struct{})
 	go func() {
@@ -91,6 +138,7 @@ func readResponsesWebsocketInput(ctx context.Context, cancel context.CancelCause
 				cancel(errRead)
 				return
 			}
+			msgEpoch := epoch.Load()
 			if kind != websocket.TextMessage && kind != websocket.BinaryMessage {
 				continue
 			}
@@ -121,8 +169,9 @@ func readResponsesWebsocketInput(ctx context.Context, cancel context.CancelCause
 					continue
 				}
 			}
+			message := cliproxyexecutor.WebsocketInput{Payload: payload, Epoch: msgEpoch}
 			select {
-			case input <- cliproxyexecutor.WebsocketInput{Payload: payload}:
+			case input <- message:
 			case <-ctx.Done():
 				return
 			}

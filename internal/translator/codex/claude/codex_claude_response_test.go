@@ -2045,3 +2045,58 @@ func TestExtractResponsesUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertCodexResponseToClaude_RestoresLongMidConversationToolAdditionName(t *testing.T) {
+	topLongMCPTool := "mcp__alpha_very_long_server_name_for_testing__deliver_final_subagent_handback_report"
+	midLongMCPTool := "mcp__bravo_very_long_server_name_for_testing__deliver_final_subagent_handback_report"
+	originalRequest := []byte(`{
+		"model": "gpt-6.1-sol",
+		"tools": [{"name": "` + topLongMCPTool + `", "input_schema": {"type": "object"}}],
+		"messages": [
+			{"role": "user", "content": "hi"},
+			{
+				"role": "system",
+				"content": [
+					{
+						"type": "tool\u005faddition",
+						"tool": {
+							"type": "tool_definition",
+							"definition": {
+								"name": "` + midLongMCPTool + `",
+								"description": "Long MCP tool added mid-conversation",
+								"input_schema": {"type": "object"}
+							}
+						}
+					}
+				]
+			}
+		]
+	}`)
+
+	translatedReq, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", originalRequest, false)
+	if err != nil {
+		t.Fatalf("ConvertClaudeRequestToCodex returned error: %v", err)
+	}
+	topShortName := gjson.GetBytes(translatedReq, "tools.0.name").String()
+	midShortName := gjson.GetBytes(translatedReq, "input.1.tools.0.name").String()
+	if topShortName == "" || midShortName == "" || topShortName == midShortName {
+		t.Fatalf("expected distinct shortened names for colliding MCP tools, got top=%q mid=%q", topShortName, midShortName)
+	}
+
+	var param any
+	addedEvent := []byte(fmt.Sprintf(`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":%q,"arguments":""}}`, midShortName))
+	chunks := ConvertCodexResponseToClaude(context.Background(), "gpt-6.1-sol", originalRequest, nil, addedEvent, &param)
+	joined := string(bytes.Join(chunks, nil))
+	if !strings.Contains(joined, `"name":"`+midLongMCPTool+`"`) {
+		t.Fatalf("streaming response did not restore long mid-conversation tool name %q, got: %s", midLongMCPTool, joined)
+	}
+
+	completedEvent := []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-6.1-sol","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":%q,"arguments":"{}"},{"type":"function_call","id":"fc_2","call_id":"call_2","name":%q,"arguments":"{}"}],"usage":{"input_tokens":10,"output_tokens":5}}}`, topShortName, midShortName))
+	nonStreamOut := ConvertCodexResponseToClaudeNonStream(context.Background(), "gpt-6.1-sol", originalRequest, nil, completedEvent, nil)
+	if got := gjson.GetBytes(nonStreamOut, "content.0.name").String(); got != topLongMCPTool {
+		t.Fatalf("non-streaming response content.0.name = %q, want %q; body=%s", got, topLongMCPTool, nonStreamOut)
+	}
+	if got := gjson.GetBytes(nonStreamOut, "content.1.name").String(); got != midLongMCPTool {
+		t.Fatalf("non-streaming response content.1.name = %q, want %q; body=%s", got, midLongMCPTool, nonStreamOut)
+	}
+}
