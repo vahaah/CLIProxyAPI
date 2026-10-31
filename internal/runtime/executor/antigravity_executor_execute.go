@@ -586,6 +586,7 @@ func (e *AntigravityExecutor) convertStreamChunksToNonStream(chunks [][]byte) []
 		}
 
 		var partsResult gjson.Result
+		var chunkUsageRaw string
 		responseNode.ForEach(func(rk, rv gjson.Result) bool {
 			switch rk.String() {
 			case "modelVersion":
@@ -597,8 +598,8 @@ func (e *AntigravityExecutor) convertStreamChunksToNonStream(chunks [][]byte) []
 					responseID = rv.String()
 				}
 			case "usageMetadata", "cpaUsageMetadata":
-				if rk.String() == "usageMetadata" || usageRaw == "" {
-					usageRaw = rv.Raw
+				if rk.String() == "usageMetadata" || chunkUsageRaw == "" {
+					chunkUsageRaw = rv.Raw
 				}
 			case "candidates":
 				if rv.IsArray() {
@@ -632,10 +633,13 @@ func (e *AntigravityExecutor) convertStreamChunksToNonStream(chunks [][]byte) []
 			}
 			return true
 		})
-		if usageRaw == "" {
+		if chunkUsageRaw == "" {
 			if usageMetadataResult := root.Get("usageMetadata"); usageMetadataResult.Exists() {
-				usageRaw = usageMetadataResult.Raw
+				chunkUsageRaw = usageMetadataResult.Raw
 			}
+		}
+		if chunkUsageRaw != "" {
+			usageRaw = chunkUsageRaw
 		}
 
 		if partsResult.IsArray() {
