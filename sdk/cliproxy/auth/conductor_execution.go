@@ -2268,7 +2268,7 @@ func (m *Manager) VerifyInference(ctx context.Context, id, model string) (*Auth,
 	}
 
 	sessionID := fmt.Sprintf("verify-%s-%d", auth.ID, time.Now().UTC().UnixNano())
-	payload := []byte(fmt.Sprintf(`{"model":%q,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"ping"}]}],"max_output_tokens":1,"store":false}`, verifyModel))
+	payload := []byte(fmt.Sprintf(`{"model":%q,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Reply exactly OK."}]}],"max_output_tokens":64,"store":false}`, verifyModel))
 	req := cliproxyexecutor.Request{
 		Model:   verifyModel,
 		Payload: payload,

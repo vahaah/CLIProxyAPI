@@ -1086,8 +1086,8 @@ func TestManager_CodexTerminalRenewalRecoveryLifecycle_Issue5783(t *testing.T) {
 	if gotSession := verifyOpts.Headers.Get("X-Session-Id"); gotSession == "" || len(gotSession) < 7 || gotSession[:7] != "verify-" {
 		t.Fatalf("VerifyInference X-Session-Id = %q, want isolated verify-* session", gotSession)
 	}
-	if !containsSubstr(string(verifyReq.Payload), `"max_output_tokens":1`) || !containsSubstr(string(verifyReq.Payload), `"store":false`) {
-		t.Fatalf("VerifyInference payload = %s, want minimal 1-token non-stored prompt", string(verifyReq.Payload))
+	if !containsSubstr(string(verifyReq.Payload), `"max_output_tokens":64`) || !containsSubstr(string(verifyReq.Payload), `"store":false`) {
+		t.Fatalf("VerifyInference payload = %s, want bounded 64-token non-stored prompt", string(verifyReq.Payload))
 	}
 	if !afterVerify.InferenceVerified || afterVerify.RecoveryStageAt(now) != RecoveryStageInferenceVerified {
 		t.Fatalf("expected InferenceVerified=true and stage=inference_verified after VerifyInference, got %v / %q", afterVerify.InferenceVerified, afterVerify.RecoveryStageAt(now))
