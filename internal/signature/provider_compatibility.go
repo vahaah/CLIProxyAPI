@@ -138,29 +138,6 @@ func isMetaMuseModelName(lower string) bool {
 	return false
 }
 
-// selfDescribingSignatureFirstChars are the base64 first characters that a
-// self-describing provider envelope can produce. A base64 first character is
-// exactly the first payload byte shifted right by two, so a single character
-// comparison rules out every known envelope without decoding anything:
-//
-//	'C' -> 0x08..0x0b : Claude CAIS (0x08)
-//	'E' -> 0x10..0x13 : Claude single-layer (0x12), Gemini protobuf_field_2 (0x12)
-//	'A' -> 0x00..0x03 : Gemini bare-Tink Vertex (0x01)
-//	'Q' -> 0x40..0x43 : Antigravity double-layer CAQS (0x43, inner 'C'), Meta Muse (0x43)
-//	'R' -> 0x44..0x47 : Claude double-layer R (0x45, inner 'E')
-//	'g' -> 0x80..0x83 : GPT Fernet reasoning (0x80)
-//
-// Gemini's ascii_uuid envelope is deliberately absent. Its first byte is the
-// first hex character of the UUID, which spreads over 'M', 'N', 'O', 'Y' and 'Z'
-// depending on the value, and it is never a replay-safe envelope: it resolves to
-// SignatureProviderUnknown whether or not it reaches the validators, and Gemini
-// model parts recover it through the bypass sentinel keyed on block kind. Listing
-// one of its five possible characters would only look like coverage.
-//
-// Any provider added here must also be validated in
-// DetectSignatureProviderForBlock, otherwise its signatures would fall through
-// to the residual class. TestSelfDescribingSignatureFirstChars_CoversEveryKnownEnvelope
-// fails when a replay-safe envelope is missing from this set.
 const selfDescribingSignatureFirstChars = "ACEQRg"
 
 // base64AlphabetSet builds a byte lookup table for the alphanumeric base64 core
