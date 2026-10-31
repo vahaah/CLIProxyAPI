@@ -1113,7 +1113,7 @@ func (h *Handler) GetAuthStatus(c *gin.Context) {
 	}
 	if session.Completed {
 		resp := gin.H{"status": "ok"}
-		if session.AuthID != "" {
+		if c.GetBool(ConfigV8ContextKey) && session.AuthID != "" {
 			resp["auth_id"] = session.AuthID
 			resp["saved"] = session.Saved
 			var adoptedAuth *coreauth.Auth
