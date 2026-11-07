@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -20,7 +21,6 @@ import (
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executionregistry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
-	"github.com/tidwall/gjson"
 )
 
 type completedWriteBarrierListener struct {
@@ -120,7 +120,7 @@ func newHomeLossFixture(t *testing.T) *homeLossFixture {
 		if dial == 1 {
 			return
 		}
-		if gjson.GetBytes(body, "previous_response_id").Exists() {
+		if ojson.GetBytes(body, "previous_response_id").Exists() {
 			t.Errorf("continuation reached upstream: %s", body)
 		}
 		_, _, _ = conn.ReadMessage()
@@ -194,7 +194,7 @@ func (f *homeLossFixture) read(t *testing.T, kind string) []byte {
 	if errRead != nil {
 		t.Fatalf("downstream closed waiting for %s: %v", kind, errRead)
 	}
-	if gjson.GetBytes(raw, "type").String() != kind {
+	if ojson.GetBytes(raw, "type").String() != kind {
 		t.Fatalf("got %s, want %s", raw, kind)
 	}
 	return raw
@@ -238,7 +238,7 @@ func TestCodexHomeUpstreamLossDoesNotReplay(t *testing.T) {
 
 	f.send(t, `{"type":"response.create","model":"model-a","previous_response_id":"old","input":[{"role":"user","content":"follow up"}]}`)
 	errFrame := f.read(t, "error")
-	if got := gjson.GetBytes(errFrame, "error.code").String(); got != "previous_response_not_found" {
+	if got := ojson.GetBytes(errFrame, "error.code").String(); got != "previous_response_not_found" {
 		t.Fatalf("continuation error = %s, want previous_response_not_found", errFrame)
 	}
 	if f.dispatcher.calls.Load() != 1 || f.creates.Load() != 1 || f.dials.Load() != 1 {
@@ -269,7 +269,7 @@ func TestCodexHomeUpstreamLossDoesNotReplay(t *testing.T) {
 	f.send(t, `{"type":"response.create","model":"model-a","input":[{"role":"user","content":"fresh full context"}]}`)
 	f.read(t, "response.created")
 	completed := f.read(t, "response.completed")
-	if got := gjson.GetBytes(completed, "response.id").String(); got != "new" {
+	if got := ojson.GetBytes(completed, "response.id").String(); got != "new" {
 		t.Fatalf("reconnected response id = %q, want new (%s)", got, completed)
 	}
 	if got, _ := f.dispatcher.pinnedAuthID.Load().(string); got != "accounted-websocket-auth" {

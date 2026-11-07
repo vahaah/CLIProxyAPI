@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "change": "Sync Mini hub with upstream v8.0.59",
+  "base": "170ad6c02d0c1018a082b4c698eebb1ca0fb459c",
+  "scope": [{"path": "**", "obligation": "SYNC-1", "modelRefs": ["Build", "Reject", "Install", "Restart"]}],
+  "domain": {
+    "context": "Mini hub installation",
+    "glossary": "formal/CONTEXT.md",
+    "aggregate": {"path": "scripts/mini-hub/install.py", "symbol": "main"},
+    "terms": ["HubInstallation", "ReleaseCandidate", "PrivateState"],
+    "invariants": [
+      {"name": "Existing private state remains intact", "modelRef": "PrivateStatePreserved"},
+      {"name": "Replacement retains the previous binary", "modelRef": "RollbackAvailable"},
+      {"name": "Failed builds leave the binary intact", "modelRef": "RejectedBuildPreserved"},
+      {"name": "Restart follows replacement", "modelRef": "ActivationOrdered"}
+    ],
+    "adrs": [{"file": "docs/adr/0001-hub-updates-preserve-private-state.md", "decision": "D1"}],
+    "controls": {"matrix": "formal/upstream-sync-matrix.json", "criteria": ["SYNC-1"]}
+  },
+  "category": {
+    "carrier": {"kind": "artifact", "contract": "Build and install the merged fork while preserving existing private state and binary rollback."},
+    "objects": [
+      {"name": "ExistingHubWithCandidate", "link": {"path": "formal/CONTEXT.md", "symbol": "ReleaseCandidate"}},
+      {"name": "UpdatedHub", "link": {"path": "formal/CONTEXT.md", "symbol": "HubInstallation"}}
+    ],
+    "arrows": [{"name": "install", "from": "ExistingHubWithCandidate", "to": "UpdatedHub", "link": {"path": "scripts/mini-hub/install.py", "symbol": "main"}, "effects": ["fs-read", "fs-write", "spawn", "network", "clock", "env"]}],
+    "composites": [],
+    "equality": "Compare installed binary, backup binary, and existing private state bytes. Logs and build timestamps do not affect equality.",
+    "laws": [
+      {"law": "id-left", "status": "not_applicable", "reason": "One artifact arrow with no declared composite."},
+      {"law": "id-right", "status": "not_applicable", "reason": "One artifact arrow with no declared composite."},
+      {"law": "assoc", "status": "not_applicable", "reason": "No reassociation of installer effects is claimed."},
+      {"law": "functor-id", "status": "not_applicable", "reason": "No functor is claimed."},
+      {"law": "functor-comp", "status": "not_applicable", "reason": "No functor is claimed."},
+      {"law": "monad-left", "status": "not_applicable", "reason": "An artifact transformation has no monad contract."},
+      {"law": "monad-right", "status": "not_applicable", "reason": "An artifact transformation has no monad contract."},
+      {"law": "monad-assoc", "status": "not_applicable", "reason": "An artifact transformation has no monad contract."}
+    ],
+    "typedWitness": "formal/check_upstream_sync.py"
+  },
+  "abstraction": {
+    "hides": "Go build metadata, atomic replacement, private configuration retention, and launchd restart details.",
+    "callersKnow": ["Use a reviewed merged candidate and the matching Go toolchain.", "Existing private state lives outside the repository."],
+    "deletionTest": "Removing the installer duplicates backup, credential retention, and launchd lifecycle rules in update commands.",
+    "alternatives": [{"name": "Official prebuilt binary", "rejectedBecause": "It omits the fork's custom quota selector."}],
+    "relation": [
+      {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "main"}, "modelAction": "Build"},
+      {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "run"}, "modelAction": "Reject"},
+      {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "replace"}, "modelAction": "Install"},
+      {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "kickstart"}, "modelAction": "Restart"}
+    ],
+    "omitted": ["Provider execution semantics use the Go regression suite, not this installer model.", "Filesystem crashes, concurrent installers, panel downloads, and remote Tailscale behavior lie outside this finite model."]
+  },
+  "model": {
+    "module": "formal/UpstreamSync.tla",
+    "config": "formal/UpstreamSync.cfg",
+    "dependencies": [],
+    "bounds": ["One existing installation, one update, two binary identities, one configuration identity, and one credential identity."],
+    "fairness": [],
+    "invariants": ["PrivateStatePreserved", "RollbackAvailable", "RejectedBuildPreserved", "ActivationOrdered"],
+    "properties": []
+  },
+  "negative": {
+    "file": "formal/UpstreamSync.tla",
+    "action": "Install",
+    "original": "configuration' = configuration",
+    "replacement": "configuration' = \"replaced\"",
+    "defect": "An update overwrites the existing server configuration.",
+    "expect": {"kind": "invariant", "name": "PrivateStatePreserved"}
+  },
+  "limits": ["The model proves bounded installation preservation, not upstream correctness.", "Go tests and review separately check merge correspondence and quota routing.", "A successful mocked restart does not establish live service health. Deployment checks establish that separately."]
+}

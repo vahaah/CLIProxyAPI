@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
-	"github.com/tidwall/gjson"
 )
 
 func TestVerifyInferenceAllowsAHealthyMultiTokenResponse(t *testing.T) {
@@ -21,7 +21,7 @@ func TestVerifyInferenceAllowsAHealthyMultiTokenResponse(t *testing.T) {
 	}
 	manager.RegisterExecutor(&customStreamMockExecutor{
 		streamFn: func(_ context.Context, _ *Auth, request cliproxyexecutor.Request, _ cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-			budget := gjson.GetBytes(request.Payload, "max_output_tokens").Int()
+			budget := ojson.GetBytes(request.Payload, "max_output_tokens").Int()
 			if budget <= 0 || budget > 128 {
 				t.Fatalf("verification token budget = %d, want a bounded probe of at most 128 tokens", budget)
 			}

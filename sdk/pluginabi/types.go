@@ -11,7 +11,7 @@ const (
 	// Plugins that still need per-chunk history chunks should keep schema_version < 5.
 	// Plugins that still require HTML entity escaping on JSON response strings
 	// should keep schema_version < 6.
-	SchemaVersion uint32 = 9
+	SchemaVersion uint32 = 10
 	// SchemaVersionStreamChunkOmitRequestBody is the first schema version that omits
 	// request bodies on payload stream-chunk interceptor calls.
 	SchemaVersionStreamChunkOmitRequestBody uint32 = 3
@@ -36,6 +36,9 @@ const (
 	// SchemaVersionMultiProviderModels is the first schema version where model
 	// registration responses may publish models for multiple providers via Registrations.
 	SchemaVersionMultiProviderModels uint32 = 9
+	// SchemaVersionMultiAuthProviders is the first schema version where a plugin
+	// may register multiple auth provider identifiers.
+	SchemaVersionMultiAuthProviders uint32 = 10
 )
 
 const (
@@ -150,6 +153,14 @@ func (e *Error) Error() string {
 		return ""
 	}
 	return e.Message
+}
+
+// ErrorCode returns the machine-readable error code embedded in the Error.
+func (e *Error) ErrorCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
 }
 
 // StatusCode returns the HTTP status code embedded in the Error, or 0 if unset.

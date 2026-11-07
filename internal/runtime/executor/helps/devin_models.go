@@ -126,7 +126,7 @@ func ResolveDevinChatModelUID(rawModel string, thinkingLevel string, budgetToken
 		thinkingLevel = strings.TrimSpace(cleanModel[colonIdx+1:])
 	}
 
-	// 4. Normalize requested effort
+	rawLevel := strings.ToLower(strings.TrimSpace(thinkingLevel))
 	effort := NormalizeThinkingLevel(thinkingLevel, budgetTokens)
 	lowerBase := strings.ToLower(baseModel)
 	canonicalBase := strings.ReplaceAll(lowerBase, ".", "-")
@@ -239,9 +239,17 @@ func ResolveDevinChatModelUID(rawModel string, thinkingLevel string, budgetToken
 		return canonicalBase
 	}
 
-	// 10. Model has thinking levels: determine default effort and clamp
+	if base, isFast := strings.CutSuffix(rawLevel, "-fast"); isFast && devinLevelIndex(base) != -1 {
+		defaultEffort := selectDefaultDevinEffort(canonicalBase, allowedLevels)
+		clamped := clampEffort(base, allowedLevels, defaultEffort)
+		return canonicalBase + "-" + clamped + "-fast"
+	}
+
 	defaultEffort := selectDefaultDevinEffort(canonicalBase, allowedLevels)
 	clamped := clampEffort(effort, allowedLevels, defaultEffort)
+	if effort == "fast" {
+		return canonicalBase + "-" + clamped + "-fast"
+	}
 	return canonicalBase + "-" + clamped
 }
 

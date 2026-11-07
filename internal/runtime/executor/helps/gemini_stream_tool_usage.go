@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/MoeForge/moego/ojson"
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
-	"github.com/tidwall/gjson"
 )
 
 type geminiFunctionCallCounter struct {
@@ -13,7 +13,7 @@ type geminiFunctionCallCounter struct {
 	seenCallIDs       map[string]struct{}
 }
 
-func (c *geminiFunctionCallCounter) observePart(candidateIdx int64, call gjson.Result) int64 {
+func (c *geminiFunctionCallCounter) observePart(candidateIdx int64, call ojson.Result) int64 {
 	if c == nil || !call.Exists() || !call.IsObject() {
 		return 0
 	}
@@ -21,7 +21,7 @@ func (c *geminiFunctionCallCounter) observePart(candidateIdx int64, call gjson.R
 	upstreamID := strings.TrimSpace(call.Get("id").String())
 
 	if active := c.activeByCandidate[candidateIdx]; active != nil {
-		ownedCall := gjson.Parse(strings.Clone(call.Raw))
+		ownedCall := ojson.Parse(strings.Clone(call.Raw))
 		if active.CanContinueWith(ownedCall) {
 			_, done := active.Assembler.PushFunctionCall(ownedCall)
 			if active.Assembler.Err() != nil || done {
@@ -37,7 +37,7 @@ func (c *geminiFunctionCallCounter) observePart(candidateIdx int64, call gjson.R
 		if rawName == "" {
 			return 0
 		}
-		ownCall := gjson.Parse(strings.Clone(call.Raw))
+		ownCall := ojson.Parse(strings.Clone(call.Raw))
 		clonedName := strings.Clone(rawName)
 		clonedID := strings.Clone(upstreamID)
 		active := translatorcommon.NewVertexStreamingToolCall(clonedName, clonedName, clonedID, clonedID, 0)

@@ -589,8 +589,8 @@ func TestCodexVerifyInferenceTranslatesPayloadAndRequiresCompletedEvent_Issue578
 	if upstreamJSON["stream"] != true || upstreamJSON["store"] != false {
 		t.Fatalf("expected translated Codex body with stream=true and store=false, got: %s", string(capturedBody))
 	}
-	if _, hasMaxOutput := upstreamJSON["max_output_tokens"]; hasMaxOutput {
-		t.Fatalf("translated Codex body must strip unsupported max_output_tokens, got: %s", string(capturedBody))
+	if maxOutputTokens := upstreamJSON["max_output_tokens"]; maxOutputTokens != float64(16) {
+		t.Fatalf("translated Codex body must carry max_output_tokens=16, got: %s", string(capturedBody))
 	}
 }
 
