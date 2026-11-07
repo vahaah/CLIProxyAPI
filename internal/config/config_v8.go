@@ -75,7 +75,7 @@ func buildV8Paths() []configPath {
 	prefixes := []configPath{
 		{"host", "server.host"}, {"port", "server.port"}, {"max-request-body-bytes", "server.max-request-body-bytes"}, {"trusted-proxies", "server.trusted-proxies"},
 		{"github-token", "server.github-token"},
-		{"tls", "server.tls"}, {"commercial-mode", "server.commercial-mode"}, {"discovery", "server.discovery"},
+		{"tls", "server.tls"}, {"commercial-mode", "server.commercial-mode"}, {"discovery", "server.discovery"}, {"kv-store", "server.kv-store"},
 		{"remote-management", "management"}, {"api-keys", "access.api-keys"},
 		{"credential-concurrency", "credentials.concurrency"}, {"credential-in-flight", "credentials.in-flight"},
 		{"force-model-prefix", "routing.force-model-prefix"},
@@ -385,6 +385,7 @@ var sharedKeyFields = map[string]bool{
 	"priority": true, "prefix": true, "proxy-url": true, "headers": true,
 	"models": true, "excluded-models": true, "disable-cooling": true,
 	"request-retry": true, "request-scoped-errors": true,
+	"connection-pool": true,
 }
 
 func expandV8Groups(groups *yaml.Node, provider string) (*yaml.Node, error) {
@@ -438,17 +439,37 @@ func expandV8Groups(groups *yaml.Node, provider string) (*yaml.Node, error) {
 				}
 			}
 			for i := 0; i < len(key.Content); i += 2 {
-				if key.Content[i].Value == "auth_index" || key.Content[i].Value == "auth-index" {
+				field := key.Content[i].Value
+				if field == "auth_index" || field == "auth-index" {
 					continue
 				}
-				if key.Content[i+1].Tag != "!!null" {
-					setYAMLPath(item, key.Content[i].Value, key.Content[i+1])
+				if key.Content[i+1].Tag == "!!null" {
+					continue
 				}
+				if field == "connection-pool" {
+					setYAMLPath(item, field, mergeConnectionPoolNode(yamlPath(group, field), key.Content[i+1]))
+					continue
+				}
+				setYAMLPath(item, field, key.Content[i+1])
 			}
 			out.Content = append(out.Content, item)
 		}
 	}
 	return out, nil
+}
+
+func mergeConnectionPoolNode(base, override *yaml.Node) *yaml.Node {
+	merged := deepCopyNode(base)
+	if merged == nil || merged.Kind != yaml.MappingNode || override == nil || override.Kind != yaml.MappingNode {
+		return deepCopyNode(override)
+	}
+	for i := 0; i < len(override.Content); i += 2 {
+		if override.Content[i+1].Tag == "!!null" {
+			continue
+		}
+		setYAMLPath(merged, override.Content[i].Value, override.Content[i+1])
+	}
+	return merged
 }
 
 // groupLegacyKeys deliberately keeps one group per legacy entry: equal endpoints

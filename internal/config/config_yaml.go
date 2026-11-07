@@ -366,9 +366,6 @@ func appendPath(path []string, key string) []string {
 	return newPath
 }
 
-// isKnownDefaultValue returns true if the given node at the specified path
-// represents a known default value that should not be written to the config file.
-// This prevents non-zero defaults from polluting the config.
 func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 	if isPluginConfigsSubtreePath(path) {
 		return false
@@ -840,10 +837,6 @@ func pruneMissingMapKeys(dstMap, srcMap *yaml.Node) {
 	}
 }
 
-// shouldPruneNestedMappingKeys reports whether keys missing from src should be pruned from dst.
-// This is strictly scoped to credential-nested mappings such as "cloak" and "headers" under
-// known credential sequence paths to prevent stale deleted keys from persisting while leaving
-// all other mappings and root sections unaffected.
 func shouldPruneNestedMappingKeys(path []string) bool {
 	if len(path) < 2 {
 		return false

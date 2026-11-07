@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "specs": ["docs/adr/0001-hub-updates-preserve-private-state.md"],
+  "tests": ["formal/check_upstream_sync.py"],
+  "links": [{"criterion": "SYNC-1", "controls": ["sync-install", "sync-reject"]}],
+  "exemptions": []
+}
