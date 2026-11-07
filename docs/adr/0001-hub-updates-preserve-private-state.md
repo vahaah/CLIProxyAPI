@@ -16,6 +16,8 @@ This record describes that existing contract.
 Merge a stable upstream release into the fork before installation.
 Keep the custom selector and existing private configuration.
 Save the installed binary before replacement.
+Regenerate `client.json` with the local endpoint and the existing API key.
+Retain server configuration, secrets, OAuth grants, and Claude/Codex preferences.
 
 ### Formal claim
 
@@ -37,8 +39,10 @@ The installer keeps its effect order.
 
 `main` builds a `.new` binary before `shutil.copy2` and `os.replace` change the installed binary.
 The model maps these operations to Build, Reject, Install, and Restart.
-Existing configuration and secrets bypass initial creation.
+Existing server configuration and secrets bypass initial creation.
+The installer rewrites generated client connection settings in `client.json`.
 The abstraction hides build commands and file replacement details from the caller.
+
 The caller supplies the repository, Go toolchain, and existing private installation.
 
 Deleting the installer moves credential preservation, backup, and service lifecycle rules into each update command.

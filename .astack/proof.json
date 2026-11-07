@@ -40,7 +40,7 @@
   },
   "abstraction": {
     "hides": "Go build metadata, atomic replacement, private configuration retention, and launchd restart details.",
-    "callersKnow": ["Use a reviewed merged candidate and the matching Go toolchain.", "Existing private state lives outside the repository."],
+    "callersKnow": ["Use a reviewed merged candidate and the matching Go toolchain.", "Existing private state lives outside the repository.", "The installer regenerates client.json with localhost and the existing API key."],
     "deletionTest": "Removing the installer duplicates backup, credential retention, and launchd lifecycle rules in update commands.",
     "alternatives": [{"name": "Official prebuilt binary", "rejectedBecause": "It omits the fork's custom quota selector."}],
     "relation": [
@@ -49,7 +49,7 @@
       {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "replace"}, "modelAction": "Install"},
       {"concrete": {"path": "scripts/mini-hub/install.py", "symbol": "kickstart"}, "modelAction": "Restart"}
     ],
-    "omitted": ["Provider execution semantics use the Go regression suite, not this installer model.", "Filesystem crashes, concurrent installers, panel downloads, and remote Tailscale behavior lie outside this finite model."]
+    "omitted": ["Generated client.json connection settings are rewritten and are not retained private state.", "Provider execution semantics use the Go regression suite, not this installer model.", "Filesystem crashes, concurrent installers, panel downloads, and remote Tailscale behavior lie outside this finite model."]
   },
   "model": {
     "module": "formal/UpstreamSync.tla",

@@ -38,6 +38,9 @@ class UpstreamSync(unittest.TestCase):
             for path, content in private_files.items():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(content)
+            client_path = config / "client.json"
+            existing_client = {"base_url": "https://existing-private-hub.test:8317", "api_key": "existing-client-key"}
+            client_path.write_text(json.dumps(existing_client))
             processes = []
 
             def run(arguments, **kwargs):
@@ -73,11 +76,12 @@ class UpstreamSync(unittest.TestCase):
                 self.assertEqual(binary.read_bytes(), b"old proxy")
                 self.assertFalse(Path(str(binary) + ".previous").exists())
                 self.assertEqual([command[0] for command in processes], ["go"])
+                self.assertEqual(json.loads(client_path.read_text()), existing_client)
             else:
                 self.assertEqual(binary.read_bytes(), b"new proxy")
                 self.assertEqual(Path(str(binary) + ".previous").read_bytes(), b"old proxy")
                 self.assertEqual(processes[-1], ["launchctl", "kickstart", "-k", "gui/" + str(INSTALLER.os.getuid()) + "/" + INSTALLER.LABEL])
-                self.assertEqual(json.loads((config / "client.json").read_text()), {"base_url": "http://127.0.0.1:8317", "api_key": "fixture-api"})
+                self.assertEqual(json.loads(client_path.read_text()), {"base_url": "http://127.0.0.1:8317", "api_key": "fixture-api"})
 
     def test_success_preserves_private_state_and_backup(self):
         """[control:sync-install]"""
