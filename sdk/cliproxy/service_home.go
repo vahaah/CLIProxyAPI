@@ -491,6 +491,10 @@ func (s *Service) runHomeSubscriber(homeCtx context.Context, parentCtx context.C
 		close(supervisor.done)
 	}()
 
+	waitRetry := waitForHomeSubscriberRetry
+	if s.homeRetryWait != nil {
+		waitRetry = s.homeRetryWait
+	}
 	var previousClient *home.Client
 	var retryBackoff homeSubscriberRetryBackoff
 	registry := executionregistry.New()
@@ -626,7 +630,7 @@ func (s *Service) runHomeSubscriber(homeCtx context.Context, parentCtx context.C
 			} else {
 				log.Warnf("home config subscription lifetime ended; retrying in %s: %v", retryDelay, errRun)
 			}
-			if retryDelay > 0 && !waitForHomeSubscriberRetry(homeCtx, retryDelay) {
+			if retryDelay > 0 && !waitRetry(homeCtx, retryDelay) {
 				return
 			}
 			previousClient = client

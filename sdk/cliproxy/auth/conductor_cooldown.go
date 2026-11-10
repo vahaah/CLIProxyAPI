@@ -934,12 +934,18 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		}
 		now = time.Now()
 		responseHeaders := internallogging.GetResponseHeaders(ctx)
-		modelState := existingModelState(auth, modelKey)
 		var cooldownRecordsBefore []CooldownStateRecord
 		trackCooldownState := m.cooldownStore != nil
 		if trackCooldownState {
 			cooldownRecordsBefore = m.cooldownStateRecordsForAuthLocked(auth, now)
 		}
+		if m != nil {
+			_ = m.migrateAuthAliasModelStatesLocked(auth, nil, now, false)
+			if modelKey != "" {
+				modelKey = m.resolveMarkResultModelKeyLocked(auth, modelKey, result.RouteModel)
+			}
+		}
+		modelState := existingModelState(auth, modelKey)
 		auth.recordRecentRequest(now, result.Success)
 		if result.Success {
 			auth.Success++
@@ -1078,7 +1084,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						} else {
 							state.NextRetryAfter = now.Add(30 * time.Minute)
 						}
-					} else if isTransientRateLimitResultError(result.Error) && statusCode == http.StatusTooManyRequests {
+					} else if !result.CredentialScope && isTransientRateLimitResultError(result.Error) && statusCode == http.StatusTooManyRequests {
 						next := transientRateLimitRetryAfter(now, result.RetryAfter, disableCooling)
 						if !next.IsZero() && state.Quota.Exceeded && state.Quota.NextRecoverAt.After(next) {
 							next = state.Quota.NextRecoverAt
@@ -1374,7 +1380,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		var targetModels []string
 		if !credentialScopedResult && modelKey != "" {
 			targetModels = append(targetModels, modelKey)
-			if routeKey := canonicalModelKey(result.RouteModel); routeKey != "" && routeKey != modelKey {
+			if routeKey := canonicalModelKey(result.RouteModel); routeKey != "" && !sameCanonicalModelKey(routeKey, modelKey) {
 				targetModels = append(targetModels, routeKey)
 			}
 		}
@@ -1494,10 +1500,28 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 
 func existingModelState(auth *Auth, model string) *ModelState {
 	model = canonicalModelKey(model)
-	if auth == nil || model == "" {
+	if auth == nil || model == "" || len(auth.ModelStates) == 0 {
 		return nil
 	}
-	return auth.ModelStates[model]
+	if state, ok := auth.ModelStates[model]; ok && state != nil {
+		return state
+	}
+	lookupKey := canonicalModelLookupKey(model)
+	if lookupKey == "" {
+		return nil
+	}
+	var matched *ModelState
+	for stateModel, state := range auth.ModelStates {
+		if state == nil || canonicalModelLookupKey(stateModel) != lookupKey {
+			continue
+		}
+		if matched == nil {
+			matched = state
+		} else {
+			matched = mergeModelState(matched.Clone(), state)
+		}
+	}
+	return matched
 }
 
 func ensureModelState(auth *Auth, model string) *ModelState {
@@ -1512,6 +1536,12 @@ func ensureModelState(auth *Auth, model string) *ModelState {
 	if state, ok := auth.ModelStates[model]; ok && state != nil {
 		return state
 	}
+	lookupKey := canonicalModelLookupKey(model)
+	for stateModel, state := range auth.ModelStates {
+		if canonicalModelLookupKey(stateModel) == lookupKey && state != nil {
+			return state
+		}
+	}
 	state := &ModelState{Status: StatusActive}
 	auth.ModelStates[model] = state
 	return state
@@ -1521,9 +1551,18 @@ func normalizeModelStates(auth *Auth) bool {
 	if auth == nil || len(auth.ModelStates) == 0 {
 		return false
 	}
+	keys := make([]string, 0, len(auth.ModelStates))
+	for model := range auth.ModelStates {
+		keys = append(keys, model)
+	}
+	if len(keys) > 1 {
+		sort.Strings(keys)
+	}
 	normalized := make(map[string]*ModelState, len(auth.ModelStates))
+	keyByLookup := make(map[string]string, len(auth.ModelStates))
 	changed := false
-	for model, state := range auth.ModelStates {
+	for _, model := range keys {
+		state := auth.ModelStates[model]
 		modelKey := canonicalModelKey(model)
 		if modelKey == "" {
 			modelKey = strings.TrimSpace(model)
@@ -1531,11 +1570,27 @@ func normalizeModelStates(auth *Auth) bool {
 		if modelKey != model {
 			changed = true
 		}
-		if existing, ok := normalized[modelKey]; ok {
-			normalized[modelKey] = mergeModelState(existing, state)
+		lookupKey := canonicalModelLookupKey(modelKey)
+		if lookupKey == "" {
+			lookupKey = strings.ToLower(modelKey)
+		}
+		if existingKey, ok := keyByLookup[lookupKey]; ok {
+			var existingClone *ModelState
+			if normalized[existingKey] != nil {
+				existingClone = normalized[existingKey].Clone()
+			}
+			merged := mergeModelState(existingClone, state)
+			targetKey := existingKey
+			if modelKey == lookupKey && existingKey != lookupKey {
+				delete(normalized, existingKey)
+				targetKey = modelKey
+				keyByLookup[lookupKey] = targetKey
+			}
+			normalized[targetKey] = merged
 			changed = true
 			continue
 		}
+		keyByLookup[lookupKey] = modelKey
 		normalized[modelKey] = state
 	}
 	if changed {
@@ -1678,7 +1733,7 @@ func (m *Manager) registryModelsForAuthAndModel(auth *Auth, authID, modelKey str
 		return nil
 	}
 
-	targetCanonical := canonicalModelKey(modelKey)
+	targetCanonical := canonicalModelLookupKey(modelKey)
 	supportedModels := registry.GetGlobalRegistry().GetModelsForClient(authID)
 	if len(supportedModels) == 0 {
 		return nil
@@ -1699,7 +1754,7 @@ func (m *Manager) registryModelsForAuthAndModel(auth *Auth, authID, modelKey str
 		if stateKey == "" {
 			stateKey = canonicalModelKey(regModelID)
 		}
-		if stateKey == targetCanonical {
+		if canonicalModelLookupKey(stateKey) == targetCanonical {
 			if _, exists := seen[regModelID]; !exists {
 				seen[regModelID] = struct{}{}
 				out = append(out, regModelID)
@@ -1935,10 +1990,10 @@ func errorCodeFromError(err error) string {
 }
 
 func isRequestScopedError(err error) bool {
-	if err == nil {
+	if err == nil || isCredentialScopedError(err) {
 		return false
 	}
-	if isRequestTerminatedError(err) && !isCredentialScopedError(err) {
+	if isRequestTerminatedError(err) {
 		return true
 	}
 	requestErr, ok := errors.AsType[cliproxyexecutor.RequestScopedError](err)
@@ -1949,7 +2004,7 @@ func isRequestScopedError(err error) bool {
 // upstream streams that ended without a terminal frame. Unlike a received
 // HTTP refusal, the generation was already submitted upstream.
 func isStreamTruncatedError(err error) bool {
-	if err == nil {
+	if err == nil || isCredentialScopedError(err) {
 		return false
 	}
 	truncatedErr, ok := errors.AsType[cliproxyexecutor.StreamTruncatedError](err)
@@ -1985,6 +2040,15 @@ func resultErrorFromError(err error) *Error {
 		resultErr.HTTPStatus = statusCodeFromError(err)
 	}
 	switch {
+	case isCredentialScopedError(err):
+		switch strings.ToLower(strings.TrimSpace(resultErr.Code)) {
+		case transientRateLimitErrorCode,
+			requestScopedErrorCode,
+			streamTruncatedErrorCode,
+			connectionLifecycleErrorCode,
+			transientTransportErrorCode:
+			resultErr.Code = credentialQuotaErrorCode
+		}
 	case isStreamTruncatedError(err):
 		// Preserve the local truncation classification alongside the public
 		// 502 status so MarkResult can skip credential cooldown.
@@ -2516,7 +2580,10 @@ func isCredentialScopedError(err error) bool {
 		IsCredentialScoped() bool
 	}
 	var csp credentialScopedProvider
-	return errors.As(err, &csp) && csp != nil && csp.IsCredentialScoped()
+	if errors.As(err, &csp) && csp != nil && csp.IsCredentialScoped() {
+		return true
+	}
+	return strings.EqualFold(errorCodeFromError(err), credentialQuotaErrorCode)
 }
 
 func statusCodeFromResult(err *Error) int {

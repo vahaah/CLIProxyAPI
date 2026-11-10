@@ -119,6 +119,7 @@ type Service struct {
 	homeConfigStageHook          func()
 	homeConfigCommitHook         func()
 	homeConfigRuntimeHook        func()
+	homeRetryWait                func(context.Context, time.Duration) bool
 	applyPprofConfigContextFn    func(context.Context, *config.Config) bool
 	updateServerClientsContextFn func(context.Context, *config.Config) bool
 	homeSupervisor               *homeSubscriberSupervisor

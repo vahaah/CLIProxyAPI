@@ -107,15 +107,16 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 		return normalized, bytes.Clone(normalized), nil
 	}
 
+	prev := strings.TrimSpace(ojson.GetBytesNoCopy(rawJSON, "previous_response_id").String())
+	if prev == "" && !inputSatisfiesPendingToolCalls(nextInput, lastResponsePendingToolCallIDs) {
+		normalized := normalizeResponseTranscriptReplacement(rawJSON, lastRequest)
+		return normalized, bytes.Clone(normalized), nil
+	}
+
 	// Websocket v2 mode uses response.create with previous_response_id + incremental input.
 	// Do not expand it into a full input transcript; upstream expects the incremental payload.
 	if allowIncrementalInputWithPreviousResponseID {
-		prev := strings.TrimSpace(ojson.GetBytesNoCopy(rawJSON, "previous_response_id").String())
 		if prev == "" {
-			if !inputSatisfiesPendingToolCalls(nextInput, lastResponsePendingToolCallIDs) {
-				normalized := normalizeResponseTranscriptReplacement(rawJSON, lastRequest)
-				return normalized, bytes.Clone(normalized), nil
-			}
 			prev = strings.TrimSpace(lastResponseID)
 		}
 		if prev != "" {

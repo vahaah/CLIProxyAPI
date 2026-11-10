@@ -1226,7 +1226,7 @@ func (e *DevinExecutor) streamDevinFramesForAuth(
 		_ = completedDoc.Set("interaction.finish_reason", completionFinishReason)
 	}
 	if finalUsage != nil {
-		totalInput := finalUsage.PromptTokens + finalUsage.CachedTokens
+		totalInput := devinTotalInputTokens(finalUsage)
 		totalOutput := finalUsage.CompletionTokens
 		totalTokens := totalInput + totalOutput
 
@@ -1657,7 +1657,7 @@ func consumeDevinFramesToInteractionsForAuth(body io.Reader, model, chatModelUID
 	}
 
 	if finalUsage != nil {
-		totalInput := finalUsage.PromptTokens + finalUsage.CachedTokens
+		totalInput := devinTotalInputTokens(finalUsage)
 		totalOutput := finalUsage.CompletionTokens
 		totalTokens := totalInput + totalOutput
 
@@ -2865,6 +2865,13 @@ func resolveDevinSessionAndCascadeIDs(ctx context.Context, sessionID, cascadeID 
 		cascadeID = normalizeDevinUUID(cascadeID)
 	}
 	return sessionID, cascadeID
+}
+
+func devinTotalInputTokens(u *helps.DevinUsage) int64 {
+	if u == nil {
+		return 0
+	}
+	return u.PromptTokens + u.CachedTokens + u.CacheWriteTokens
 }
 
 func normalizeDevinUUID(raw string) string {
