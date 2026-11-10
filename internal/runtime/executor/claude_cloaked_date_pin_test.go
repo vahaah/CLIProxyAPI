@@ -346,15 +346,20 @@ func TestClaudeCloakedDateReminderProbeOverrideDoesNotReinitializeSessionDate(t 
 
 func TestClaudeCloakedDateReminderPersistsAcrossRestartWithLocalBBoltKV(t *testing.T) {
 	homekv.ClearCurrent()
-	_ = kvstore.ShutdownLocal()
+	if errShutdown := kvstore.ShutdownLocal(); errShutdown != nil {
+		t.Fatalf("kvstore.ShutdownLocal() setup error = %v", errShutdown)
+	}
 	helps.ResetClaudeDiagnosticsForTest()
+
+	dbPath := filepath.Join(t.TempDir(), "kv.db")
 	t.Cleanup(func() {
 		homekv.ClearCurrent()
-		_ = kvstore.ShutdownLocal()
+		if errShutdown := kvstore.ShutdownLocal(); errShutdown != nil {
+			t.Errorf("kvstore.ShutdownLocal() cleanup error = %v", errShutdown)
+		}
 		helps.ResetClaudeDiagnosticsForTest()
 	})
 
-	dbPath := filepath.Join(t.TempDir(), "kv.db")
 	if errCfg := kvstore.ConfigureLocal(true, dbPath); errCfg != nil {
 		t.Fatalf("kvstore.ConfigureLocal(true, %q) error = %v", dbPath, errCfg)
 	}

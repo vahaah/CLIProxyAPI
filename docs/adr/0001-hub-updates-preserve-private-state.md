@@ -53,6 +53,8 @@ Go regression checks separately establish request, authentication, and quota sel
 
 [criterion:SYNC-1] The candidate includes upstream `v8.0.59` and retains the fork's quota routing and installation contract.
 
+> Note 2026-11-10: SYNC-1 also covers later stable release merges. `MINI_HUB.md` records the current release. D1 still applies.
+
 [Model](../../formal/UpstreamSync.tla), [configuration](../../formal/UpstreamSync.cfg),
 [control matrix](../../formal/upstream-sync-matrix.json), and [installer controls](../../formal/check_upstream_sync.py) define executable evidence.
 Run `python3 formal/check_upstream_sync.py`, `go test ./...`, and the quota routing race tests.

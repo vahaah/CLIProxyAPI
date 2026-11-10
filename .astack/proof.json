@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "change": "Sync Mini hub with upstream v8.0.59",
-  "base": "170ad6c02d0c1018a082b4c698eebb1ca0fb459c",
+  "change": "Sync Mini hub with upstream v8.0.64",
+  "base": "fd89a8e2d53d93b9e3976c4362d63a4d3bdc6270",
   "scope": [{"path": "**", "obligation": "SYNC-1", "modelRefs": ["Build", "Reject", "Install", "Restart"]}],
   "domain": {
     "context": "Mini hub installation",
