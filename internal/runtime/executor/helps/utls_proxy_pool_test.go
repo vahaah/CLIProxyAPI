@@ -116,11 +116,6 @@ func TestUtlsAnthropicTransportPoolsPerCredential(t *testing.T) {
 	}
 }
 
-// TestUtlsClaudeCodeDefaultDisablesConnectionReusePreservingExplicitPool verifies
-// that by default (including OAuth and unpooled API keys) the Claude Code uTLS
-// transport closes connections after each request instead of leaving them in an
-// idle pool, while an API key that explicitly configures connection-pool still
-// reuses its pooled connection.
 func TestUtlsClaudeCodeDefaultDisablesConnectionReusePreservingExplicitPool(t *testing.T) {
 	ResetProxyTransports()
 	t.Cleanup(ResetProxyTransports)
