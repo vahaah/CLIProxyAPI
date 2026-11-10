@@ -1411,6 +1411,21 @@ func TestServiceHeartbeatFailoverDoesNotDrainBlockingScope(t *testing.T) {
 	cfg.Home.Port = port
 	cfg.Home.DisableClusterDiscovery = true
 	service := &Service{cfg: cfg}
+	retryStarted := make(chan struct{}, 1)
+	allowRetry := make(chan struct{})
+	service.homeRetryWait = func(ctx context.Context, _ time.Duration) bool {
+		select {
+		case retryStarted <- struct{}{}:
+		case <-ctx.Done():
+			return false
+		}
+		select {
+		case <-allowRetry:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 	serviceCtx, cancelService := context.WithCancel(context.Background())
 	t.Cleanup(cancelService)
 	service.homeMu.Lock()
@@ -1449,13 +1464,21 @@ func TestServiceHeartbeatFailoverDoesNotDrainBlockingScope(t *testing.T) {
 
 	close(loseFirst)
 	select {
+	case <-retryStarted:
+	case <-started:
+		t.Fatal("heartbeat failover started draining the blocking scope")
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat failover did not reach the reconnect wait")
+	}
+	close(allowRetry)
+	select {
 	case <-secondSubscribe:
 	case <-started:
 		t.Fatal("heartbeat failover started draining the blocking scope")
 	case <-serviceCtx.Done():
 		t.Fatal("heartbeat failover canceled the service run before resubscription")
-	case <-t.Context().Done():
-		t.Fatal("test ended before the replacement subscription started")
+	case <-time.After(time.Second):
+		t.Fatal("new subscription did not start while the old scope remained active")
 	}
 	service.homeMu.Lock()
 	exposedRegistry := service.homeRegistry
