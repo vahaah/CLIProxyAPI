@@ -469,6 +469,7 @@ func listPluginStoreWithQueryForTest(t *testing.T, h *Handler, query string) plu
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v8/management/plugins/store"+query, nil)
+	c.Set(ConfigV8ContextKey, true)
 	h.ListPluginStore(c)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())

@@ -221,7 +221,7 @@ func (h *Handler) ListPluginStore(c *gin.Context) {
 }
 
 func pluginStoreForceRefresh(c *gin.Context) bool {
-	if c == nil {
+	if c == nil || !c.GetBool(ConfigV8ContextKey) {
 		return false
 	}
 	refresh := strings.TrimSpace(c.Query("refresh"))
