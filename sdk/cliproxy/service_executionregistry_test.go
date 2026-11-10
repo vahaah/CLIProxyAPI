@@ -1495,7 +1495,7 @@ func TestServiceHeartbeatFailoverDoesNotDrainBlockingScope(t *testing.T) {
 		t.Fatal("heartbeat failover canceled the service run")
 	case <-started:
 		t.Fatal("heartbeat failover drained the blocking scope before or after the replacement ACK")
-	default:
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	releaseOnce.Do(func() { close(release) })
