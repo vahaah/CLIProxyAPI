@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "change": "Retain execution resources through HTTP shutdown",
+  "base": "46127b5d4d049329c20a868d3e3b05c39b2df3c5",
+  "scope": [
+    {
+      "path": "**",
+      "obligation": "SHUTDOWN-1",
+      "modelRefs": [
+        "RequestShutdown",
+        "BeginDrain",
+        "Complete",
+        "ForceClose",
+        "Teardown"
+      ]
+    }
+  ],
+  "domain": {
+    "context": "Service shutdown",
+    "glossary": "formal/CONTEXT.md",
+    "aggregate": {
+      "path": "sdk/cliproxy/service_lifecycle.go",
+      "symbol": "Service"
+    },
+    "terms": [
+      "ShutdownBudget",
+      "ActiveRequest",
+      "ExecutionResources"
+    ],
+    "invariants": [
+      {
+        "name": "Execution resources outlive accepted HTTP work",
+        "modelRef": "ResourcesOutliveHTTP"
+      },
+      {
+        "name": "A graceful request completes before final teardown",
+        "modelRef": "SuccessfulDrain"
+      },
+      {
+        "name": "The default budget skips graceful draining",
+        "modelRef": "ImmediateSkipsDrain"
+      }
+    ],
+    "adrs": [
+      {
+        "file": "docs/adr/0003-drain-http-before-home-teardown.md",
+        "decision": "D1"
+      }
+    ],
+    "controls": {
+      "matrix": "formal/shutdown-safety-matrix.json",
+      "criteria": [
+        "SHUTDOWN-1"
+      ]
+    }
+  },
+  "category": {
+    "carrier": {
+      "kind": "artifact",
+      "contract": "Shutdown closes HTTP according to the configured budget before releasing execution resources."
+    },
+    "objects": [
+      {
+        "name": "ActiveService",
+        "link": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Service"
+        }
+      },
+      {
+        "name": "StoppedService",
+        "link": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Shutdown"
+        }
+      }
+    ],
+    "arrows": [
+      {
+        "name": "Shutdown",
+        "from": "ActiveService",
+        "to": "StoppedService",
+        "link": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Shutdown"
+        },
+        "effects": [
+          "fs-read",
+          "fs-write",
+          "spawn",
+          "network",
+          "clock",
+          "env"
+        ]
+      }
+    ],
+    "composites": [],
+    "equality": "Compare the HTTP status and body or connection error, plus whether bound Home resources remain live during the drain and close afterwards.",
+    "laws": [
+      {
+        "law": "id-left",
+        "status": "not_applicable",
+        "reason": "One artifact arrow with no declared composite."
+      },
+      {
+        "law": "id-right",
+        "status": "not_applicable",
+        "reason": "One artifact arrow with no declared composite."
+      },
+      {
+        "law": "assoc",
+        "status": "not_applicable",
+        "reason": "No reassociation of shutdown effects is claimed."
+      },
+      {
+        "law": "functor-id",
+        "status": "not_applicable",
+        "reason": "No functor is claimed."
+      },
+      {
+        "law": "functor-comp",
+        "status": "not_applicable",
+        "reason": "No functor is claimed."
+      },
+      {
+        "law": "monad-left",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      },
+      {
+        "law": "monad-right",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      },
+      {
+        "law": "monad-assoc",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      }
+    ],
+    "typedWitness": "sdk/cliproxy/service_shutdown_drain_test.go"
+  },
+  "abstraction": {
+    "hides": "HTTP shutdown mechanics and execution resource teardown order.",
+    "callersKnow": [
+      "A zero shutdown budget closes HTTP immediately.",
+      "A positive budget permits completion until its deadline.",
+      "Home lifetime ends after the HTTP stop."
+    ],
+    "deletionTest": "Removing service shutdown ordering makes callers duplicate the resource lifetime contract.",
+    "alternatives": [
+      {
+        "name": "Close Home first",
+        "rejectedBecause": "It cancels active request resources before HTTP draining begins."
+      }
+    ],
+    "relation": [
+      {
+        "concrete": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Run"
+        },
+        "modelAction": "RequestShutdown"
+      },
+      {
+        "concrete": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Shutdown"
+        },
+        "modelAction": "BeginDrain"
+      },
+      {
+        "concrete": {
+          "path": "internal/api/server.go",
+          "symbol": "Stop"
+        },
+        "modelAction": "Complete"
+      },
+      {
+        "concrete": {
+          "path": "internal/api/server.go",
+          "symbol": "Stop"
+        },
+        "modelAction": "ForceClose"
+      },
+      {
+        "concrete": {
+          "path": "sdk/cliproxy/service_lifecycle.go",
+          "symbol": "Shutdown"
+        },
+        "modelAction": "Teardown"
+      }
+    ],
+    "omitted": [
+      "The model abstracts quantitative deadlines into graceful, immediate, and exhausted outcomes.",
+      "Third-party transport behavior and Home protocol internals require Go integration checks."
+    ]
+  },
+  "model": {
+    "module": "formal/ShutdownSafety.tla",
+    "config": "formal/ShutdownSafety.cfg",
+    "dependencies": [],
+    "bounds": [
+      "One accepted request, one service shutdown, one bound resource, and three budget outcomes."
+    ],
+    "fairness": [],
+    "invariants": [
+      "ResourcesOutliveHTTP",
+      "SuccessfulDrain",
+      "ImmediateSkipsDrain"
+    ],
+    "properties": []
+  },
+  "negative": {
+    "file": "formal/ShutdownSafety.tla",
+    "action": "RequestShutdown",
+    "original": "resourcesOpen' = resourcesOpen",
+    "replacement": "resourcesOpen' = FALSE",
+    "defect": "Shutdown cancels Home execution resources before HTTP draining.",
+    "expect": {
+      "kind": "invariant",
+      "name": "ResourcesOutliveHTTP"
+    }
+  },
+  "limits": [
+    "The model proves finite shutdown ordering, not timing bounds.",
+    "Go regressions separately validate exact HTTP outcomes and bound resource cancellation.",
+    "The independent Home lifetime relies on explicit service teardown during Run exit."
+  ]
+}

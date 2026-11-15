@@ -21,3 +21,14 @@ The collector owns its schema and commits incoming usage events before aggregati
 
 **DailyTotal** is the sum of recorded usage for a calendar day in `Europe/London`.
 A collector restart preserves committed records and their aggregates.
+
+# Service shutdown
+
+**ShutdownBudget** selects immediate HTTP closure or a bounded interval for active requests to finish.
+The API server owns this policy.
+
+**ActiveRequest** is an accepted HTTP request that can still use Home execution resources.
+It completes or loses its connection before the service closes those resources.
+
+**ExecutionResources** are the Home subscriber lifetime, execution registry, and request-owned upstream contexts.
+The service retains them through HTTP draining and closes them during final teardown.

@@ -149,7 +149,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	if homeEnabled {
-		s.startHomeSubscriber(ctx)
+		s.startHomeSubscriber(context.WithoutCancel(ctx))
 	}
 
 	if s.server != nil && s.wsGateway != nil {
@@ -247,15 +247,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-// Shutdown stops background workers and immediately closes the HTTP server.
-// It ensures all resources are properly cleaned up and connections are closed.
-// The shutdown is idempotent and can be called multiple times safely.
-//
-// Parameters:
-//   - ctx: The context for controlling the shutdown timeout
-//
-// Returns:
-//   - error: An error if shutdown fails
+// Shutdown drains HTTP requests within the configured budget before closing execution resources.
+// A zero budget closes requests immediately. Repeated calls are safe.
 func (s *Service) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -264,6 +257,12 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		if ctx == nil {
 			ctx = context.Background()
+		}
+		if s.server != nil {
+			if errStop := s.server.Stop(ctx); errStop != nil {
+				log.Errorf("error stopping API server: %v", errStop)
+				shutdownErr = errStop
+			}
 		}
 
 		s.homeMu.Lock()
@@ -333,7 +332,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		if watcher := s.currentWatcher(); watcher != nil {
 			if err := watcher.Stop(); err != nil {
 				log.Errorf("failed to stop file watcher: %v", err)
-				shutdownErr = err
+				if shutdownErr == nil {
+					shutdownErr = err
+				}
 			}
 		}
 		if s.wsGateway != nil {
@@ -364,15 +365,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 
 		// no legacy clients to persist
-
-		if s.server != nil {
-			if errStop := s.server.Stop(ctx); errStop != nil {
-				log.Errorf("error stopping API server: %v", errStop)
-				if shutdownErr == nil {
-					shutdownErr = errStop
-				}
-			}
-		}
 
 		if s.pluginHost != nil {
 			sdktranslator.SetPluginHooks(nil)
