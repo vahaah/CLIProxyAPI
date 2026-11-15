@@ -104,7 +104,21 @@ Use SQLite's backup API for a live manual backup.
 Do not copy only `app.db` while SQLite has an active WAL.
 
 To disable collection, set `usage-statistics-enabled` to `false` through the v8 configuration API.
-Stop the collector with `launchctl bootout`.
+Disable automatic startup and stop the collector:
+
+```sh
+launchctl disable "gui/$(id -u)/com.vahaah.cliproxyapi-mini.usage-keeper"
+launchctl bootout "gui/$(id -u)/com.vahaah.cliproxyapi-mini.usage-keeper"
+```
+
 Retain its data directory to keep existing history.
+To restore the service, use these commands:
+
+```sh
+launchctl enable "gui/$(id -u)/com.vahaah.cliproxyapi-mini.usage-keeper"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.vahaah.cliproxyapi-mini.usage-keeper.plist"
+```
+
+Enable proxy collection after the collector becomes ready.
 The in-memory proxy queue does not guarantee delivery during an outage or a crash.
 Committed SQLite records remain available after a collector restart.
