@@ -24,6 +24,11 @@ def parse_environment(text):
     return environment
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def check_usage_tracking(snapshot_path=None, save_path=None):
     """[control:usage-live]"""
     home = Path.home()
@@ -35,16 +40,16 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
         "TZ": "Europe/London", "BACKUP_ENABLED": "true", "BACKUP_INTERVAL": "24h",
         "BACKUP_RETENTION_DAYS": "7", "USAGE_RAW_RETENTION_DAYS": "0",
     }.items():
-        assert environment[name] == value, name
-    assert environment["LOGIN_PASSWORD"] != environment["CPA_MANAGEMENT_KEY"]
+        require(environment[name] == value, name)
+    require(environment["LOGIN_PASSWORD"] != environment["CPA_MANAGEMENT_KEY"], "Separate dashboard password required")
     for path in [keeper, keeper / "data"]:
-        assert path.stat().st_mode & 0o077 == 0, "Private directory permissions"
+        require(path.stat().st_mode & 0o077 == 0, "Private directory permissions")
     for path in [keeper / ".env", config / "usage-keeper-password"]:
-        assert path.stat().st_mode & 0o077 == 0, "Private file permissions"
+        require(path.stat().st_mode & 0o077 == 0, "Private file permissions")
     agent = home / "Library/LaunchAgents/com.vahaah.cliproxyapi-mini.usage-keeper.plist"
     service = plistlib.loads(agent.read_bytes())
-    assert service["RunAtLoad"] and service["KeepAlive"]
-    assert service["Umask"] == 0o077
+    require(service["RunAtLoad"] and service["KeepAlive"], "Automatic collector startup required")
+    require(service["Umask"] == 0o077, "Private service umask required")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     request = urllib.request.Request(
         environment["CPA_BASE_URL"] + "/v8/management/config",
@@ -53,21 +58,21 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
     with opener.open(request, timeout=15) as response:
         settings = json.load(response)
     usage = settings["observability"]["usage"]
-    assert usage["usage-statistics-enabled"] is True
-    assert usage["redis-usage-queue-retention-seconds"] == 3600
-    assert settings["observability"]["logs"]["request-log"] is False
+    require(usage["usage-statistics-enabled"] is True, "Usage collection disabled")
+    require(usage["redis-usage-queue-retention-seconds"] == 3600, "Usage retention mismatch")
+    require(settings["observability"]["logs"]["request-log"] is False, "Full request logging enabled")
     dashboard_url = "http://" + environment["APP_HOST"] + ":" + environment["APP_PORT"]
     with opener.open(dashboard_url + "/readyz", timeout=15) as response:
-        assert response.status == 200
+        require(response.status == 200, "Collector not ready")
     try:
-        opener.open(dashboard_url + "/api/v1/usage/overview", timeout=15)
+        opener.open(dashboard_url + "/api/v1/usage/overview", timeout=15).close()
     except urllib.error.HTTPError as error:
-        assert error.code == 401, "Dashboard requires a login"
+        require(error.code == 401, "Dashboard requires a login")
     else:
-        raise AssertionError("Dashboard allows unauthenticated usage access")
+        raise ValueError("Dashboard allows unauthenticated usage access")
     database = keeper / "data/app.db"
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
-        assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        require(connection.execute("PRAGMA quick_check").fetchone()[0] == "ok", "SQLite integrity failure")
         events, tokens = connection.execute("SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM usage_events").fetchone()
         days, daily_tokens = connection.execute("SELECT COUNT(DISTINCT bucket_start), COALESCE(SUM(total_tokens), 0) FROM usage_overview_daily_stats").fetchone()
         snapshot = {
@@ -76,15 +81,15 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
         }
         if snapshot_path:
             saved = json.loads(snapshot_path.read_text())
-            assert saved["events"] and saved["daily"], "A restart snapshot needs recorded usage"
+            require(saved["events"] and saved["daily"], "A restart snapshot needs recorded usage")
             for event_key, *counts in saved["events"]:
                 actual = connection.execute("SELECT input_tokens,output_tokens,total_tokens FROM usage_events WHERE event_key=?", (event_key,)).fetchone()
-                assert actual is not None and list(actual) == counts, "Committed event changed after restart"
+                require(actual is not None and list(actual) == counts, "Committed event changed after restart")
             for row_id, *counts in saved["daily"]:
                 actual = connection.execute("SELECT request_count,input_tokens,output_tokens,total_tokens FROM usage_overview_daily_stats WHERE id=?", (row_id,)).fetchone()
-                assert actual is not None and all(a >= b for a, b in zip(actual, counts)), "Daily counter decreased after restart"
-    assert events > 0 and tokens > 0, "A real token record must reach persistent storage"
-    assert days > 0 and daily_tokens > 0, "Daily totals must contain real token usage"
+                require(actual is not None and all(a >= b for a, b in zip(actual, counts)), "Daily counter decreased after restart")
+    require(events > 0 and tokens > 0, "A real token record must reach persistent storage")
+    require(days > 0 and daily_tokens > 0, "Daily totals must contain real token usage")
     if save_path:
         save_path.write_text(json.dumps(snapshot))
         save_path.chmod(0o600)
