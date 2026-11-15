@@ -5,9 +5,23 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import sqlite3
 import urllib.error
 import urllib.request
+
+
+def parse_environment(text):
+    environment = {}
+    for line in text.splitlines():
+        fields = shlex.split(line, comments=True)
+        if not fields:
+            continue
+        if len(fields) != 1 or "=" not in fields[0]:
+            raise ValueError("Invalid collector environment assignment")
+        name, value = fields[0].split("=", 1)
+        environment[name] = value
+    return environment
 
 
 def check_usage_tracking(snapshot_path=None, save_path=None):
@@ -15,10 +29,7 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
     home = Path.home()
     config = home / ".config/cliproxyapi-mini"
     keeper = home / ".local/share/cliproxyapi-mini/usage-keeper"
-    environment = dict(
-        (name, json.loads(value))
-        for name, value in (line.split("=", 1) for line in (keeper / ".env").read_text().splitlines())
-    )
+    environment = parse_environment((keeper / ".env").read_text())
     for name, value in {
         "APP_HOST": "127.0.0.1", "APP_PORT": "8318", "AUTH_ENABLED": "true",
         "TZ": "Europe/London", "BACKUP_ENABLED": "true", "BACKUP_INTERVAL": "24h",
