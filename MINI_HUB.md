@@ -143,6 +143,9 @@ exercise that behavior with controlled quota signals.
 
 ## Files and recovery
 
+[Persistent token totals](docs/usage-tracking.md) describes the local usage dashboard,
+its separate password, SQLite storage, daily backups, and restart checks.
+
 | Path | Purpose |
 | --- | --- |
 | `~/.config/cliproxyapi-mini/config.yaml` | Effective v8 server configuration; contains the client key and hashed management secret |
