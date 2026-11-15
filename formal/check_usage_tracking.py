@@ -1,6 +1,7 @@
 """Check the local EnableTracking procedure without printing private fields."""
 
 import argparse
+import http.cookiejar
 import json
 import os
 from pathlib import Path
@@ -30,7 +31,43 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def check_usage_tracking(snapshot_path=None, save_path=None):
+def check_tailscale(environment):
+    status = json.loads(subprocess.check_output(["tailscale", "serve", "status", "--json"], text=True))
+    device = json.loads(subprocess.check_output(["tailscale", "status", "--json"], text=True))
+    require(device["BackendState"] == "Running", "Tailscale is not connected")
+    host = device["Self"]["DNSName"].rstrip(".")
+    site = host + ":" + environment["APP_PORT"]
+    target = "http://" + environment["APP_HOST"] + ":" + environment["APP_PORT"]
+    require(status["Web"][site]["Handlers"]["/"]["Proxy"] == target, "Dashboard Serve route mismatch")
+    require(status["TCP"][environment["APP_PORT"]]["HTTPS"] is True, "Private HTTPS required")
+    require(not status.get("AllowFunnel", {}).get(site, False), "Dashboard Funnel is enabled")
+    base = "https://" + site
+    cookies = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(cookies))
+    for path in ["/", "/readyz"]:
+        with opener.open(base + path, timeout=15) as response:
+            require(response.status == 200, "Private HTTPS dashboard unavailable")
+    try:
+        opener.open(base + "/api/v1/usage/overview?range=today", timeout=15).close()
+    except urllib.error.HTTPError as error:
+        require(error.code == 401, "Private HTTPS login protection failed")
+    else:
+        raise ValueError("Private HTTPS usage allows anonymous access")
+    request = urllib.request.Request(
+        base + "/api/v1/auth/login",
+        data=json.dumps({"password": environment["LOGIN_PASSWORD"]}).encode(),
+        headers={"Content-Type": "application/json", "X-CPA-Usage-Keeper-Request": "fetch", "Origin": base},
+    )
+    with opener.open(request, timeout=15) as response:
+        require(response.status == 204, "Private HTTPS password login failed")
+    require(bool(cookies) and all(cookie.secure for cookie in cookies), "Secure session cookie required")
+    for route in ["overview", "analysis", "events"]:
+        with opener.open(base + "/api/v1/usage/" + route + "?range=today", timeout=15) as response:
+            require(response.status == 200 and isinstance(json.load(response), dict), "Authenticated usage query failed")
+    print("ok [control:usage-tailnet]: private Serve route and eight HTTPS checks")
+
+
+def check_usage_tracking(snapshot_path=None, save_path=None, tailscale=False):
     """[control:usage-live]"""
     home = Path.home()
     config = home / ".config/cliproxyapi-mini"
@@ -99,6 +136,8 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
     if save_path:
         save_path.write_text(json.dumps(snapshot))
         save_path.chmod(0o600)
+    if tailscale:
+        check_tailscale(environment)
     print("ok: usage tracking, private access, SQLite integrity, and persistent daily totals")
 
 
@@ -107,5 +146,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save-snapshot", type=Path)
     parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--tailscale", action="store_true")
     arguments = parser.parse_args()
-    check_usage_tracking(arguments.snapshot, arguments.save_snapshot)
+    check_usage_tracking(arguments.snapshot, arguments.save_snapshot, arguments.tailscale)

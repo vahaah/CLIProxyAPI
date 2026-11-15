@@ -1,6 +1,8 @@
+import json
 import unittest
+from unittest.mock import patch
 
-from check_usage_tracking import parse_environment, require
+from check_usage_tracking import check_tailscale, parse_environment, require
 
 
 class UsageEnvironment(unittest.TestCase):
@@ -20,6 +22,20 @@ class UsageEnvironment(unittest.TestCase):
     def test_rejects_an_invalid_deployment_setting(self):
         with self.assertRaisesRegex(ValueError, "Login protection required"):
             require(False, "Login protection required")
+
+    def test_rejects_public_dashboard_sharing_before_login(self):
+        port, hostname, loopback = "8318", "fixture.ts.net", "127.0.0.1"
+        site = hostname + ":" + port
+        status = {
+            "TCP": {port: {"HTTPS": True}},
+            "Web": {site: {"Handlers": {"/": {"Proxy": "http://" + loopback + ":" + port}}}},
+            "AllowFunnel": {site: True},
+        }
+        device = {"BackendState": "Running", "Self": {"DNSName": hostname + "."}}
+        with patch("check_usage_tracking.subprocess.check_output", side_effect=[json.dumps(status), json.dumps(device)]), \
+                patch("check_usage_tracking.urllib.request.build_opener", side_effect=AssertionError("Public route must be rejected before any login")):
+            with self.assertRaisesRegex(ValueError, "Funnel"):
+                check_tailscale({"APP_HOST": loopback, "APP_PORT": port})
 
 
 if __name__ == "__main__":

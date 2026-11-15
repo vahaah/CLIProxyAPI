@@ -43,16 +43,26 @@ tailscale serve --https=8318 off
 ```
 
 The proxy's existing port 8317 route remains separate.
+Run the repeatable route, login, and usage checks:
+
+```sh
+python3 formal/check_usage_tracking.py --tailscale
+```
 
 ## Read usage in CoCode
 
 An agent on the Mini can read the collector's authenticated API.
+Use `http://127.0.0.1:8318` as the API base URL on the Mini.
+The private HTTPS address works as the base URL from the tailnet.
 Use the local dashboard password file without printing its contents.
 Sign in through `POST /api/v1/auth/login` with a JSON password body.
-Send `X-CPA-Usage-Keeper-Request: fetch` and retain the returned session cookie.
 
+Send `X-CPA-Usage-Keeper-Request: fetch` for login.
+Retain the returned session cookie.
 Read daily totals through `GET /api/v1/usage/overview?range=today`.
-The analysis and event routes provide model, account, cache, reasoning, and failure details.
+Read model, account, cache, and reasoning details through `GET /api/v1/usage/analysis?range=today`.
+Read request and failure details through `GET /api/v1/usage/events?range=today`.
+
 CoCode can summarize these results when you ask.
 Only requests routed through this proxy appear in the collector.
 

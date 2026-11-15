@@ -2,6 +2,6 @@
   "version": 1,
   "specs": ["docs/adr/0002-persist-token-totals-in-a-local-collector.md"],
   "tests": ["formal/check_usage_tracking.py"],
-  "links": [{"criterion": "USAGE-1", "controls": ["usage-live"]}],
+  "links": [{"criterion": "USAGE-1", "controls": ["usage-live", "usage-tailnet"]}],
   "exemptions": []
 }
