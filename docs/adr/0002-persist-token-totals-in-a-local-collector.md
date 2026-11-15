@@ -67,4 +67,5 @@ The model describes deployment order and committed-data retention, not SQLite in
 Provider accounting, timezone conversion, and deduplication use the native collector's implementation.
 Live checks establish installation correspondence independently of the model.
 Disable usage emission and stop the collector to roll back.
+Remove its private HTTPS route with `tailscale serve --https=8318 off`.
 Keep its data directory for later access.

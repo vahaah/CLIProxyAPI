@@ -157,6 +157,7 @@ To disable collection, set `usage-statistics-enabled` to `false` through the v8 
 Disable automatic startup and stop the collector:
 
 ```sh
+tailscale serve --https=8318 off
 launchctl disable "gui/$(id -u)/com.vahaah.cliproxyapi-mini.usage-keeper"
 launchctl bootout "gui/$(id -u)/com.vahaah.cliproxyapi-mini.usage-keeper"
 ```
@@ -170,5 +171,6 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.vahaah.clipro
 ```
 
 Enable proxy collection after the collector becomes ready.
+Repeat the phone access command to restore the private HTTPS route.
 The in-memory proxy queue does not guarantee delivery during an outage or a crash.
 Committed SQLite records remain available after a collector restart.
