@@ -1,6 +1,7 @@
 ---------------------------- MODULE UsageTracking ----------------------------
 EXTENDS Naturals
 
+CONSTANT Tokens
 VARIABLES phase, enabled, stored, host, protected, keys
 vars == <<phase, enabled, stored, host, protected, keys>>
 
@@ -19,7 +20,7 @@ Enable == /\ phase = "prepared"
 Commit == /\ phase = "enabled"
           /\ enabled
           /\ phase' = "committed"
-          /\ stored' = 143
+          /\ stored' = Tokens
           /\ UNCHANGED <<enabled, host, protected, keys>>
 
 Restart == /\ phase = "committed"
@@ -33,6 +34,6 @@ Finish == /\ phase = "verified"
 Next == Enable \/ Commit \/ Restart \/ Finish
 Spec == Init /\ [][Next]_vars
 EnabledBeforeCommit == stored > 0 => enabled
-DurableTotals == phase = "verified" => stored = 143
+DurableTotals == phase = "verified" => stored = Tokens
 PrivateAccess == host = "127.0.0.1" /\ protected /\ keys = "existing"
 =============================================================================

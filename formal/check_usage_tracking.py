@@ -56,10 +56,11 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
     assert usage["usage-statistics-enabled"] is True
     assert usage["redis-usage-queue-retention-seconds"] == 3600
     assert settings["observability"]["logs"]["request-log"] is False
-    with opener.open("http://127.0.0.1:8318/readyz", timeout=15) as response:
+    dashboard_url = "http://" + environment["APP_HOST"] + ":" + environment["APP_PORT"]
+    with opener.open(dashboard_url + "/readyz", timeout=15) as response:
         assert response.status == 200
     try:
-        opener.open("http://127.0.0.1:8318/api/v1/usage/overview", timeout=15)
+        opener.open(dashboard_url + "/api/v1/usage/overview", timeout=15)
     except urllib.error.HTTPError as error:
         assert error.code == 401, "Dashboard requires a login"
     else:
