@@ -17,6 +17,7 @@ Keep the proxy and its provider configuration in place.
 Use an authenticated loopback listener, SQLite storage, London calendar days, and daily backups.
 Start the collector before enabling usage emission through an ETag-checked configuration patch.
 Retain raw history without automatic expiry.
+Allow phone access through private Tailscale Serve while retaining loopback binding and password login.
 
 ### Formal claim
 
@@ -30,6 +31,7 @@ These transitions describe requirements for the native deployment, not proofs of
 Live listener, login, ingestion, and restart checks establish installation correspondence separately.
 
 Optional private Tailscale sharing retains loopback binding, login protection, and stored totals.
+The model proves state preservation through Share. Live route and HTTPS checks validate the network configuration separately.
 
 ### Category composition
 

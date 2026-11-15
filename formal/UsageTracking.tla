@@ -2,8 +2,8 @@
 EXTENDS Naturals
 
 CONSTANT Tokens
-VARIABLES phase, enabled, stored, host, protected, keys, phone
-vars == <<phase, enabled, stored, host, protected, keys, phone>>
+VARIABLES phase, enabled, stored, host, protected, keys
+vars == <<phase, enabled, stored, host, protected, keys>>
 
 Init == /\ phase = "prepared"
         /\ enabled = FALSE
@@ -11,38 +11,35 @@ Init == /\ phase = "prepared"
         /\ host = "unconfigured"
         /\ protected = FALSE
         /\ keys = "existing"
-        /\ phone = "off"
 
 Enable == /\ phase = "prepared"
           /\ phase' = "enabled"
           /\ enabled' = TRUE
           /\ host' = "127.0.0.1"
           /\ protected' = TRUE
-          /\ UNCHANGED <<stored, keys, phone>>
+          /\ UNCHANGED <<stored, keys>>
 
 Commit == /\ phase = "enabled"
           /\ enabled
           /\ phase' = "committed"
           /\ stored' = Tokens
-          /\ UNCHANGED <<enabled, host, protected, keys, phone>>
+          /\ UNCHANGED <<enabled, host, protected, keys>>
 
 Restart == /\ phase = "committed"
            /\ phase' = "verified"
            /\ stored' = stored
-           /\ UNCHANGED <<enabled, host, protected, keys, phone>>
+           /\ UNCHANGED <<enabled, host, protected, keys>>
 
 Share == /\ phase = "verified"
-         /\ phone = "off"
-         /\ phone' = "tailnet"
-         /\ UNCHANGED <<phase, enabled, stored, host, protected, keys>>
+         /\ phase' = "shared"
+         /\ UNCHANGED <<enabled, stored, host, protected, keys>>
 
-Finish == /\ phase = "verified"
+Finish == /\ phase \in {"verified", "shared"}
           /\ UNCHANGED vars
 
 Next == Enable \/ Commit \/ Restart \/ Share \/ Finish
 Spec == Init /\ [][Next]_vars
 EnabledBeforeCommit == stored > 0 => enabled
-DurableTotals == phase = "verified" => stored = Tokens
+DurableTotals == phase \in {"verified", "shared"} => stored = Tokens
 PrivateAccess == phase # "prepared" => host = "127.0.0.1" /\ protected /\ keys = "existing"
-TailnetOnly == phone \in {"off", "tailnet"}
 =============================================================================

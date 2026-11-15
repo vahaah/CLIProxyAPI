@@ -38,10 +38,6 @@
       {
         "name": "Collector access remains private",
         "modelRef": "PrivateAccess"
-      },
-      {
-        "name": "Optional phone access stays within the tailnet",
-        "modelRef": "TailnetOnly"
       }
     ],
     "adrs": [
@@ -205,8 +201,7 @@
     "invariants": [
       "EnabledBeforeCommit",
       "DurableTotals",
-      "PrivateAccess",
-      "TailnetOnly"
+      "PrivateAccess"
     ],
     "properties": []
   },
@@ -225,6 +220,7 @@
     "The finite model proves the deployment procedure contract, not third-party software correctness.",
     "Live checks independently establish access controls, ingestion, SQLite integrity, and daily totals.",
     "A restart probe checks committed record retention. It does not establish crash durability or guarantee upstream delivery.",
-    "Private HTTPS, authentication, and daily API checks validate the server path. A physical phone connection is not part of the local model."
+    "Private HTTPS, authentication, and daily API checks validate the server path. A physical phone connection is not part of the local model.",
+    "Share proves preservation of committed totals, collector binding, and authentication. It does not model the Tailscale network implementation."
   ]
 }
