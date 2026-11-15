@@ -70,7 +70,9 @@ Keep full request logs disabled.
 ## Storage and recovery
 
 The database is `~/.local/share/cliproxyapi-mini/usage-keeper/data/app.db`.
-Daily backups use the adjacent `backups` directory and retain seven days.
+The configuration requests a 24-hour backup interval and seven-day retention.
+The collector uses the adjacent `backups` directory.
+Examine the backup logs for scheduled runs.
 Raw usage records have no automatic expiry.
 The user service starts at login and restarts after a crash.
 
