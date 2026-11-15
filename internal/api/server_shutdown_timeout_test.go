@@ -127,12 +127,7 @@ func TestServerStop_ShutdownTimeoutDrainsInFlightRequests(t *testing.T) {
 	reqDone := startSlowRequest(t, fx.addr)
 	<-fx.reqStarted
 
-	// Release the handler shortly after Stop begins: it must still be allowed to
-	// answer because the drain keeps the connection alive.
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		fx.releaseHandler()
-	}()
+	fx.server.server.RegisterOnShutdown(fx.releaseHandler)
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
