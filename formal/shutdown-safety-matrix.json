@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "specs": ["docs/adr/0003-drain-http-before-home-teardown.md"],
+  "tests": ["sdk/cliproxy/service_shutdown_drain_test.go"],
+  "links": [{"criterion": "SHUTDOWN-1", "controls": ["shutdown-home"]}],
+  "exemptions": []
+}

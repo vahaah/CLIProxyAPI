@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "change": "Enable private persistent daily token totals",
+  "base": "df7ed71401d36757cc129a4e57f3cda9913b478f",
+  "scope": [
+    {
+      "path": "**",
+      "obligation": "USAGE-1",
+      "modelRefs": [
+        "Enable",
+        "Commit",
+        "Restart",
+        "Share"
+      ]
+    }
+  ],
+  "domain": {
+    "context": "Persistent usage tracking",
+    "glossary": "formal/CONTEXT.md",
+    "aggregate": {
+      "path": "docs/usage-tracking.md",
+      "symbol": "EnableTracking"
+    },
+    "terms": [
+      "TrackedHub",
+      "UsageStore",
+      "DailyTotal"
+    ],
+    "invariants": [
+      {
+        "name": "Emission precedes committed usage",
+        "modelRef": "EnabledBeforeCommit"
+      },
+      {
+        "name": "Committed totals survive a collector restart",
+        "modelRef": "DurableTotals"
+      },
+      {
+        "name": "Collector access remains private",
+        "modelRef": "PrivateAccess"
+      }
+    ],
+    "adrs": [
+      {
+        "file": "docs/adr/0002-persist-token-totals-in-a-local-collector.md",
+        "decision": "D1"
+      }
+    ],
+    "controls": {
+      "matrix": "formal/usage-tracking-matrix.json",
+      "criteria": [
+        "USAGE-1"
+      ]
+    }
+  },
+  "category": {
+    "carrier": {
+      "kind": "artifact",
+      "contract": "EnableTracking installs the verified native collector and enables private durable usage collection."
+    },
+    "objects": [
+      {
+        "name": "ExistingHub",
+        "link": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "EnableTracking"
+        }
+      },
+      {
+        "name": "TrackedHub",
+        "link": {
+          "path": "formal/CONTEXT.md",
+          "symbol": "TrackedHub"
+        }
+      }
+    ],
+    "arrows": [
+      {
+        "name": "EnableTracking",
+        "from": "ExistingHub",
+        "to": "TrackedHub",
+        "link": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "EnableTracking"
+        },
+        "effects": [
+          "fs-read",
+          "fs-write",
+          "spawn",
+          "network",
+          "clock",
+          "env"
+        ]
+      }
+    ],
+    "composites": [],
+    "equality": "Compare declared deployment settings, committed event identities, and daily token counters before and after a restart.",
+    "laws": [
+      {
+        "law": "id-left",
+        "status": "not_applicable",
+        "reason": "One artifact arrow with no declared composite."
+      },
+      {
+        "law": "id-right",
+        "status": "not_applicable",
+        "reason": "One artifact arrow with no declared composite."
+      },
+      {
+        "law": "assoc",
+        "status": "not_applicable",
+        "reason": "No reassociation of installer effects is claimed."
+      },
+      {
+        "law": "functor-id",
+        "status": "not_applicable",
+        "reason": "No functor is claimed."
+      },
+      {
+        "law": "functor-comp",
+        "status": "not_applicable",
+        "reason": "No functor is claimed."
+      },
+      {
+        "law": "monad-left",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      },
+      {
+        "law": "monad-right",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      },
+      {
+        "law": "monad-assoc",
+        "status": "not_applicable",
+        "reason": "An artifact transformation has no monad contract."
+      }
+    ],
+    "typedWitness": "formal/check_usage_tracking.py"
+  },
+  "abstraction": {
+    "hides": "Native subscription handling, SQLite migrations, durable event deduplication, and daily aggregation.",
+    "callersKnow": [
+      "Use the verified v2.1.0 native release.",
+      "Keep private configuration and the persistent data directory.",
+      "Use a separate dashboard password and London calendar days."
+    ],
+    "deletionTest": "Removing the native collector requires another implementation for durable events, daily aggregation, and backups.",
+    "alternatives": [
+      {
+        "name": "In-memory proxy queue only",
+        "rejectedBecause": "It cannot preserve daily totals across a process restart."
+      }
+    ],
+    "relation": [
+      {
+        "concrete": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "EnableTracking"
+        },
+        "modelAction": "Enable"
+      },
+      {
+        "concrete": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "EnableTracking"
+        },
+        "modelAction": "Commit"
+      },
+      {
+        "concrete": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "EnableTracking"
+        },
+        "modelAction": "Restart"
+      },
+      {
+        "concrete": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "tailscale"
+        },
+        "modelAction": "Share"
+      }
+    ],
+    "omitted": [
+      "Native collector and SQLite internals are third-party implementations.",
+      "Upstream queue delivery during an outage is not guaranteed.",
+      "Timezone conversion, backups, and event deduplication require independent implementation checks.",
+      "The Share preservation relation retains collector binding, authentication, and stored totals. Tailscale implements network isolation."
+    ]
+  },
+  "model": {
+    "module": "formal/UsageTracking.tla",
+    "config": "formal/UsageTracking.cfg",
+    "dependencies": [],
+    "bounds": [
+      "One hub, one collector, one committed 143-token event, one collector restart, and one optional private dashboard publication."
+    ],
+    "fairness": [],
+    "invariants": [
+      "EnabledBeforeCommit",
+      "DurableTotals",
+      "PrivateAccess"
+    ],
+    "properties": []
+  },
+  "negative": {
+    "file": "formal/UsageTracking.tla",
+    "action": "Restart",
+    "original": "stored' = stored",
+    "replacement": "stored' = 0",
+    "defect": "A collector restart discards committed token totals.",
+    "expect": {
+      "kind": "invariant",
+      "name": "DurableTotals"
+    }
+  },
+  "limits": [
+    "The finite model proves the deployment procedure contract, not third-party software correctness.",
+    "Live checks independently establish access controls, ingestion, SQLite integrity, and daily totals.",
+    "A restart probe checks committed record retention. It does not establish crash durability or guarantee upstream delivery.",
+    "Private HTTPS, authentication, and daily API checks validate the server path. A physical phone connection is not part of the local model.",
+    "Share proves preservation of committed totals, collector binding, and authentication. It does not model the Tailscale network implementation."
+  ]
+}

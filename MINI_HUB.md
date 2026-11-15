@@ -1,6 +1,6 @@
 # Personal Mac mini hub
 
-This fork tracks CLIProxyAPI **v8.0.64**. The `mini-hub` branch adds
+This fork tracks CLIProxyAPI **v8.0.72**. The `mini-hub` branch adds
 `soonest-reset-first` routing and a native macOS installer. Upstream remains the
 `upstream` remote; the unmodified upstream branch is `main`.
 
@@ -132,7 +132,7 @@ configuration; its direct ChatGPT sign-in does not select this proxy.
 - The proxy binds to `127.0.0.1`, authenticates API and management traffic with
   separate random keys, and trusts forwarding headers only from localhost.
   Logs rotate within 128 MB; full request logging and profiling are disabled.
-- Management Center **v1.26.7** is pinned with a SHA-256 check for fresh installs.
+- Management Center **v1.28.0** is pinned with a SHA-256 check for fresh installs.
   Existing panel files are retained on reinstallation.
 
 Account ordering requires useful headers from the provider. Until those arrive,
@@ -142,6 +142,9 @@ prove that a real multi-account pool balances correctly; the regression tests
 exercise that behavior with controlled quota signals.
 
 ## Files and recovery
+
+[Persistent token totals](docs/usage-tracking.md) describes the local usage dashboard,
+its separate password, SQLite storage, daily backups, and restart checks.
 
 | Path | Purpose |
 | --- | --- |
