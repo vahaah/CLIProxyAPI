@@ -16,7 +16,45 @@ pbcopy < ~/.config/cliproxyapi-mini/usage-keeper-password
 
 Sign in and select Today or a date range.
 The dashboard shows input, output, cache, and reasoning tokens by model and account.
-The listener accepts local connections only.
+The collector binds to loopback.
+
+## Phone access
+
+Enable Tailscale on the phone and connect to the Mini's tailnet.
+Publish the local dashboard through private HTTPS on the Mini:
+
+```sh
+tailscale serve --bg --https=8318 http://127.0.0.1:8318
+```
+
+Open the HTTPS address that the command prints on the phone.
+Use the same dashboard password.
+Keep `APP_HOST=127.0.0.1` and password protection enabled.
+Use Tailscale Serve, which restricts access to the tailnet.
+
+Set `CPA_PUBLIC_URL` to the existing private proxy URL on port 8317.
+Restart the collector after changing its `.env` file.
+The dashboard's link back to the proxy then works from the phone.
+
+To remove only dashboard sharing:
+
+```sh
+tailscale serve --https=8318 off
+```
+
+The proxy's existing port 8317 route remains separate.
+
+## Read usage in CoCode
+
+An agent on the Mini can read the collector's authenticated API.
+Use the local dashboard password file without printing its contents.
+Sign in through `POST /api/v1/auth/login` with a JSON password body.
+Send `X-CPA-Usage-Keeper-Request: fetch` and retain the returned session cookie.
+
+Read daily totals through `GET /api/v1/usage/overview?range=today`.
+The analysis and event routes provide model, account, cache, reasoning, and failure details.
+CoCode can summarize these results when you ask.
+Only requests routed through this proxy appear in the collector.
 
 ## EnableTracking
 

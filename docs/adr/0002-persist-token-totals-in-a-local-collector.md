@@ -25,8 +25,11 @@ The model requires Restart to retain the modeled token count.
 The negative control removes that retention and must violate DurableTotals.
 Enable configures the modeled loopback address and login requirement before collection.
 It assumes a successful database commit and successful local filesystem operations.
+
 These transitions describe requirements for the native deployment, not proofs of the vendor implementation.
 Live listener, login, ingestion, and restart checks establish installation correspondence separately.
+
+Optional private Tailscale sharing retains loopback binding, login protection, and stored totals.
 
 ### Category composition
 
@@ -42,6 +45,8 @@ The native collector hides subscription handling, schema migrations, deduplicati
 Callers retain the private data directory and use the separate dashboard password.
 Deleting the collector removes durable event storage and requires another persistence implementation.
 The official release supplies the persistence implementation. This repository adds no replacement collector.
+
+Tailscale Serve maps optional phone access to Share without changing the collector's bind address or data.
 
 ### Verification
 

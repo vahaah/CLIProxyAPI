@@ -9,7 +9,8 @@
       "modelRefs": [
         "Enable",
         "Commit",
-        "Restart"
+        "Restart",
+        "Share"
       ]
     }
   ],
@@ -37,6 +38,10 @@
       {
         "name": "Collector access remains private",
         "modelRef": "PrivateAccess"
+      },
+      {
+        "name": "Optional phone access stays within the tailnet",
+        "modelRef": "TailnetOnly"
       }
     ],
     "adrs": [
@@ -173,12 +178,20 @@
           "symbol": "EnableTracking"
         },
         "modelAction": "Restart"
+      },
+      {
+        "concrete": {
+          "path": "docs/usage-tracking.md",
+          "symbol": "tailscale"
+        },
+        "modelAction": "Share"
       }
     ],
     "omitted": [
       "Native collector and SQLite internals are third-party implementations.",
       "Upstream queue delivery during an outage is not guaranteed.",
-      "Timezone conversion, backups, and event deduplication require independent implementation checks."
+      "Timezone conversion, backups, and event deduplication require independent implementation checks.",
+      "The Share preservation relation retains collector binding, authentication, and stored totals. Tailscale implements network isolation."
     ]
   },
   "model": {
@@ -186,13 +199,14 @@
     "config": "formal/UsageTracking.cfg",
     "dependencies": [],
     "bounds": [
-      "One hub, one collector, one committed 143-token event, and one collector restart."
+      "One hub, one collector, one committed 143-token event, one collector restart, and one optional private dashboard publication."
     ],
     "fairness": [],
     "invariants": [
       "EnabledBeforeCommit",
       "DurableTotals",
-      "PrivateAccess"
+      "PrivateAccess",
+      "TailnetOnly"
     ],
     "properties": []
   },
@@ -210,6 +224,7 @@
   "limits": [
     "The finite model proves the deployment procedure contract, not third-party software correctness.",
     "Live checks independently establish access controls, ingestion, SQLite integrity, and daily totals.",
-    "A restart probe checks committed record retention. It does not establish crash durability or guarantee upstream delivery."
+    "A restart probe checks committed record retention. It does not establish crash durability or guarantee upstream delivery.",
+    "Private HTTPS, authentication, and daily API checks validate the server path. A physical phone connection is not part of the local model."
   ]
 }
