@@ -2,7 +2,7 @@
 
 The Mini uses [CPA Usage Keeper v2.1.0](https://github.com/Willxup/cpa-usage-keeper/releases/tag/v2.1.0).
 The collector subscribes to usage events and stores them in SQLite.
-Daily totals use `Europe/London`, including daylight saving changes.
+Daily totals use the configured `Europe/London` timezone.
 Collection starts when you enable tracking. It cannot recover earlier requests.
 
 ## Open the dashboard
