@@ -21,9 +21,12 @@ Retain raw history without automatic expiry.
 ### Formal claim
 
 The finite procedure enables emission before committing one record.
-A collector restart preserves the committed token total.
-The model retains loopback access, authentication, and the existing management key.
+The model requires Restart to retain the modeled token count.
+The negative control removes that retention and must violate DurableTotals.
+Enable configures the modeled loopback address and login requirement before collection.
 It assumes a successful database commit and successful local filesystem operations.
+These transitions describe requirements for the native deployment, not proofs of the vendor implementation.
+Live listener, login, ingestion, and restart checks establish installation correspondence separately.
 
 ### Category composition
 

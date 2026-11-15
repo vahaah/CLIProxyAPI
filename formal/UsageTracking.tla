@@ -8,14 +8,16 @@ vars == <<phase, enabled, stored, host, protected, keys>>
 Init == /\ phase = "prepared"
         /\ enabled = FALSE
         /\ stored = 0
-        /\ host = "127.0.0.1"
-        /\ protected = TRUE
+        /\ host = "unconfigured"
+        /\ protected = FALSE
         /\ keys = "existing"
 
 Enable == /\ phase = "prepared"
           /\ phase' = "enabled"
           /\ enabled' = TRUE
-          /\ UNCHANGED <<stored, host, protected, keys>>
+          /\ host' = "127.0.0.1"
+          /\ protected' = TRUE
+          /\ UNCHANGED <<stored, keys>>
 
 Commit == /\ phase = "enabled"
           /\ enabled
@@ -35,5 +37,5 @@ Next == Enable \/ Commit \/ Restart \/ Finish
 Spec == Init /\ [][Next]_vars
 EnabledBeforeCommit == stored > 0 => enabled
 DurableTotals == phase = "verified" => stored = Tokens
-PrivateAccess == host = "127.0.0.1" /\ protected /\ keys = "existing"
+PrivateAccess == phase # "prepared" => host = "127.0.0.1" /\ protected /\ keys = "existing"
 =============================================================================

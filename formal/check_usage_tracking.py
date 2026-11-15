@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import shlex
 import sqlite3
+import subprocess
 import urllib.error
 import urllib.request
 
@@ -62,6 +63,11 @@ def check_usage_tracking(snapshot_path=None, save_path=None):
     require(usage["redis-usage-queue-retention-seconds"] == 3600, "Usage retention mismatch")
     require(settings["observability"]["logs"]["request-log"] is False, "Full request logging enabled")
     dashboard_url = "http://" + environment["APP_HOST"] + ":" + environment["APP_PORT"]
+    bindings = subprocess.check_output([
+        "/usr/sbin/lsof", "-nP", "-iTCP:" + environment["APP_PORT"], "-sTCP:LISTEN", "-Fn",
+    ], text=True)
+    listeners = [line[1:] for line in bindings.splitlines() if line.startswith("n")]
+    require(listeners == [environment["APP_HOST"] + ":" + environment["APP_PORT"]], "Collector listener is not private")
     with opener.open(dashboard_url + "/readyz", timeout=15) as response:
         require(response.status == 200, "Collector not ready")
     try:
