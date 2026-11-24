@@ -142,7 +142,7 @@
   "abstraction": {
     "hides": "Native subscription handling, SQLite migrations, durable event deduplication, and daily aggregation.",
     "callersKnow": [
-      "Use the verified v2.1.0 native release.",
+      "Use the verified v2.1.1 native release.",
       "Keep private configuration and the persistent data directory.",
       "Use a separate dashboard password and London calendar days."
     ],

@@ -22,8 +22,8 @@ CONFIG = USER_DIR / ".config/cliproxyapi-mini"
 STATE = USER_DIR / ".local/share/cliproxyapi-mini"
 COMMANDS = USER_DIR / ".local/bin"
 LABEL = "com.vahaah.cliproxyapi-mini"
-PANEL_URL = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center/releases/download/v1.28.0/management.html"
-PANEL_SHA256 = "035cdd5340a5b9a76cb43d11e45444be1990ae1ecff413d6a92b7e8f03bc6373"
+PANEL_URL = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center/releases/download/v1.29.1/management.html"
+PANEL_SHA256 = "30df9503402af03e04affb55920458c13139a07757c8428fc845299876d19c43"
 
 
 def private_write(path, content, mode=0o600):

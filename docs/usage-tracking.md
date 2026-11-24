@@ -1,6 +1,6 @@
 # Persistent token totals
 
-The Mini uses [CPA Usage Keeper v2.1.0](https://github.com/Willxup/cpa-usage-keeper/releases/tag/v2.1.0).
+The Mini uses [CPA Usage Keeper v2.1.1](https://github.com/Willxup/cpa-usage-keeper/releases/tag/v2.1.1).
 The collector subscribes to usage events and stores them in SQLite.
 Daily totals use the configured `Europe/London` timezone.
 Collection starts when you enable tracking. It cannot recover earlier requests.
@@ -72,7 +72,7 @@ Use the native `darwin_arm64` release on an Apple Silicon Mini.
 Examine its archive SHA-256 before installation:
 
 ```text
-2c59d4d51f5fd00ad12b18b94b41ceecb023bc69735e99fb7b6f599f2d476e5b
+bafcc792c87d576b65014d1f0261c0f50de66ff3a76da18a075e5063248a42c6
 ```
 
 Keep the executable and its private `.env` under `~/.local/share/cliproxyapi-mini/usage-keeper/`.
