@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the native Mini hub, or an exported laptop client, without sudo."""
+"""Install the native Mini hub, helper updates, or an exported client without sudo."""
 
 import argparse
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import secrets
 import shutil
 import subprocess
@@ -24,6 +25,25 @@ COMMANDS = USER_DIR / ".local/bin"
 LABEL = "com.vahaah.cliproxyapi-mini"
 PANEL_URL = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center/releases/download/v1.29.1/management.html"
 PANEL_SHA256 = "30df9503402af03e04affb55920458c13139a07757c8428fc845299876d19c43"
+CLIENT_COMMANDS = (
+    "hubctl",
+    "claude-hub",
+    "codex-hub",
+    "grok-hub",
+    "gemini-hub",
+    "agy-hub",
+    "kimi-hub",
+    "opencode-hub",
+    "muse-hub",
+)
+DEFAULT_KIMI_MODELS = (
+    "kimi-k3.1-pro",
+    "kimi-k3.1-pro-highspeed",
+    "kimi-k3",
+    "kimi-k2.8-code",
+    "kimi-k2.5",
+)
+TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def private_write(path, content, mode=0o600):
@@ -44,39 +64,317 @@ def json_write(path, value):
     private_write(path, json.dumps(value, indent=2) + "\n")
 
 
+def toml_key(name):
+    return name if TOML_BARE_KEY_RE.match(name) else json.dumps(name)
+
+
+def load_json_object(path):
+    if not path.exists():
+        return {}
+    raw = path.read_text().strip()
+    if not raw:
+        return {}
+    data = json.loads(raw)
+    return data if isinstance(data, dict) else {}
+
+
+def load_mcp_servers():
+    for candidate in (CONFIG / "mcp-servers.json", STATE / "mcp-servers.json", HERE / "mcp-servers.json"):
+        if candidate.exists():
+            data = load_json_object(candidate)
+            servers = data.get("mcpServers", data)
+            if isinstance(servers, dict):
+                return servers
+    return {}
+
+
+def render_toml_mcp_blocks(servers, include_enabled=False):
+    blocks = []
+    for name in sorted(servers):
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        lines = [f"[mcp_servers.{toml_key(name)}]"]
+        if spec.get("url"):
+            lines.append("url = " + json.dumps(spec["url"]))
+        elif spec.get("command"):
+            lines.append("command = " + json.dumps(spec["command"]))
+            if spec.get("args"):
+                lines.append("args = " + json.dumps(list(spec["args"])))
+        else:
+            continue
+        if include_enabled:
+            lines.append("enabled = true")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def render_opencode_mcp(servers):
+    result = {}
+    for name in sorted(servers):
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("url"):
+            result[name] = {"type": "remote", "url": spec["url"], "enabled": True}
+        elif spec.get("command"):
+            result[name] = {"type": "local", "command": [spec["command"], *spec.get("args", [])], "enabled": True}
+    return result
+
+
+def render_gemini_mcp(servers):
+    result = {}
+    for name in sorted(servers):
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("url"):
+            result[name] = {"httpUrl": spec["url"]}
+        elif spec.get("command"):
+            entry = {"command": spec["command"]}
+            if spec.get("args"):
+                entry["args"] = list(spec["args"])
+            result[name] = entry
+    return result
+
+
+def render_kimi_mcp(servers):
+    result = {}
+    for name in sorted(servers):
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("url"):
+            result[name] = {"url": spec["url"]}
+        elif spec.get("command"):
+            entry = {"command": spec["command"]}
+            if spec.get("args"):
+                entry["args"] = list(spec["args"])
+            result[name] = entry
+    return result
+
+
+def render_claude_mcp(servers, claude_settings=None):
+    enabled_plugins = set()
+    if isinstance(claude_settings, dict):
+        for plugin_id, enabled in (claude_settings.get("enabledPlugins") or {}).items():
+            if enabled:
+                enabled_plugins.add(plugin_id.split("@", 1)[0])
+    result = {}
+    for name in sorted(servers):
+        if name in enabled_plugins:
+            continue
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("url"):
+            result[name] = {"type": "http", "url": spec["url"]}
+        elif spec.get("command"):
+            entry = {"type": "stdio", "command": spec["command"], "args": list(spec.get("args", []))}
+            result[name] = entry
+    return result
+
+
+def render_muse_mcp(servers):
+    result = {}
+    for name in sorted(servers):
+        spec = servers[name]
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("url"):
+            result[name] = {"type": "streamable-http", "url": spec["url"]}
+        elif spec.get("command"):
+            result[name] = {"type": "stdio", "command": spec["command"], "args": list(spec.get("args", []))}
+    return result
+
+
+def render_kimi_config(base_url, models=DEFAULT_KIMI_MODELS):
+    model_list = list(models) if models else list(DEFAULT_KIMI_MODELS)
+    lines = [
+        "# Isolated CLIProxyAPI client; credentials come from kimi-hub.",
+        "default_model = " + json.dumps(model_list[0]),
+        "",
+        "[providers.cliproxy]",
+        'type = "openai"',
+        "base_url = " + json.dumps(base_url.rstrip("/") + "/v1"),
+        'api_key_env = "KIMI_API_KEY"',
+    ]
+    for model_id in model_list:
+        lines.extend([
+            "",
+            f"[models.{json.dumps(model_id)}]",
+            'provider = "cliproxy"',
+            "model = " + json.dumps(model_id),
+            "max_context_size = 262144",
+        ])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def default_opencode_config(base_url, mcp_servers=None):
+    base = base_url.rstrip("/")
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {
+            "cliproxy-claude": {
+                "npm": "@ai-sdk/anthropic",
+                "name": "Mini hub (Claude)",
+                "options": {
+                    "baseURL": base + "/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "claude-opus-5-5": {"name": "Claude Opus 5.5"},
+                    "claude-sonnet-5-5": {"name": "Claude Sonnet 5.5"},
+                    "claude-haiku-5-5": {"name": "Claude Haiku 5.5"},
+                },
+            },
+            "cliproxy-codex": {
+                "npm": "@ai-sdk/openai",
+                "name": "Mini hub (Codex)",
+                "options": {
+                    "baseURL": base + "/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "gpt-6-astra": {"name": "GPT-6 Astra"},
+                    "gpt-6.1-sol": {"name": "GPT-6.1 Sol"},
+                    "gpt-6-luna": {"name": "GPT-6 Luna"},
+                },
+            },
+            "cliproxy-gemini": {
+                "npm": "@ai-sdk/google",
+                "name": "Mini hub (Antigravity / Gemini)",
+                "options": {
+                    "baseURL": base + "/v1beta",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "gemini-4-argon-high": {"name": "Gemini 4 Argon High"},
+                    "gemini-3.8-flash-high": {"name": "Gemini 3.8 Flash High"},
+                    "gemini-3-flash": {"name": "Gemini 3 Flash"},
+                },
+            },
+            "cliproxy-xai": {
+                "npm": "@ai-sdk/openai",
+                "name": "Mini hub (xAI / Grok)",
+                "options": {
+                    "baseURL": base + "/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "grok-4.7": {"name": "Grok 4.7"},
+                    "grok-4.7-build-fast": {"name": "Grok 4.7 Build Fast"},
+                },
+            },
+            "cliproxy-kimi": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Mini hub (Kimi)",
+                "options": {
+                    "baseURL": base + "/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "kimi-k3.1-pro": {"name": "Kimi K3.1 Pro"},
+                    "kimi-k3": {"name": "Kimi K3"},
+                },
+            },
+            "cliproxy-meta": {
+                "npm": "@ai-sdk/openai",
+                "name": "Mini hub (Meta / Muse)",
+                "options": {
+                    "baseURL": base + "/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+                "models": {
+                    "muse-wonder-full-1.0": {"name": "Muse Wonder Full 1.0"},
+                    "muse-spark-1.3": {"name": "Muse Spark 1.3"},
+                },
+            },
+        },
+    }
+    if mcp_servers:
+        config["mcp"] = render_opencode_mcp(mcp_servers)
+    return config
+
+
 def install_clients(client):
     json_write(CONFIG / "client.json", client)
+    base_url = client["base_url"].rstrip("/")
+    mcp_servers = load_mcp_servers()
     # Isolate preferences and history; authentication is injected by the wrapper.
     claude_dir = USER_DIR / ".claude-hub"
     claude_dir.mkdir(mode=0o700, exist_ok=True)
-    claude_settings = claude_dir / "settings.json"
-    if not claude_settings.exists():
-        original = USER_DIR / ".claude/settings.json"
-        settings = json.loads(original.read_text()) if original.exists() else {}
+    claude_settings_path = claude_dir / "settings.json"
+    if not claude_settings_path.exists():
+        claude_settings = load_json_object(USER_DIR / ".claude/settings.json")
         for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"):
-            settings.get("env", {}).pop(key, None)
-        json_write(claude_settings, settings)
+            claude_settings.get("env", {}).pop(key, None)
+        json_write(claude_settings_path, claude_settings)
+    else:
+        claude_settings = load_json_object(claude_settings_path)
+    claude_mcp_path = claude_dir / ".claude.json"
+    if mcp_servers and not claude_mcp_path.exists():
+        claude_mcp = render_claude_mcp(mcp_servers, claude_settings)
+        if claude_mcp:
+            json_write(claude_mcp_path, {"mcpServers": claude_mcp})
     codex_dir = USER_DIR / ".codex-hub"
     codex_dir.mkdir(mode=0o700, exist_ok=True)
     codex_settings = codex_dir / "config.toml"
     if not codex_settings.exists():
-        private_write(codex_settings, '\n'.join([
-            '# Isolated CLIProxyAPI client; credentials come from codex-hub.',
+        codex_text = "\n".join([
+            "# Isolated CLIProxyAPI client; credentials come from codex-hub.",
             'model_provider = "cliproxy"',
-            '',
-            '[model_providers.cliproxy]',
+            "",
+            "[model_providers.cliproxy]",
             'name = "Mini hub"',
-            'base_url = ' + json.dumps(client["base_url"] + "/v1"),
+            "base_url = " + json.dumps(base_url + "/v1"),
             'env_key = "CLIPROXY_API_KEY"',
             'wire_api = "responses"',
-            'requires_openai_auth = false',
-            'supports_websockets = true',
+            "requires_openai_auth = false",
+            "supports_websockets = true",
             # The hub already owns credential retries. Avoid multiplying them.
-            'request_max_retries = 1',
-            'stream_max_retries = 1',
-            '',
-        ]))
-    for name in ("hubctl", "claude-hub", "codex-hub"):
+            "request_max_retries = 1",
+            "stream_max_retries = 1",
+            "",
+        ])
+        mcp_toml = render_toml_mcp_blocks(mcp_servers, include_enabled=False)
+        if mcp_toml:
+            codex_text += "\n" + mcp_toml + "\n"
+        private_write(codex_settings, codex_text)
+    grok_dir = USER_DIR / ".grok-hub"
+    grok_dir.mkdir(mode=0o700, exist_ok=True)
+    grok_settings = grok_dir / "config.toml"
+    if mcp_servers and not grok_settings.exists():
+        grok_mcp = render_toml_mcp_blocks(mcp_servers, include_enabled=True)
+        if grok_mcp:
+            private_write(grok_settings, "# Isolated CLIProxyAPI client; credentials come from grok-hub.\n\n" + grok_mcp + "\n")
+    gemini_dir = USER_DIR / ".gemini-hub/.gemini"
+    gemini_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    (USER_DIR / ".gemini-hub").chmod(0o700)
+    gemini_settings = gemini_dir / "settings.json"
+    if not gemini_settings.exists():
+        gemini_data = {"security": {"auth": {"selectedType": "gemini-api-key"}}}
+        if mcp_servers:
+            gemini_data["mcpServers"] = render_gemini_mcp(mcp_servers)
+        json_write(gemini_settings, gemini_data)
+    kimi_dir = USER_DIR / ".kimi-hub"
+    kimi_dir.mkdir(mode=0o700, exist_ok=True)
+    kimi_settings = kimi_dir / "config.toml"
+    if not kimi_settings.exists():
+        private_write(kimi_settings, render_kimi_config(base_url))
+    kimi_mcp = kimi_dir / "mcp.json"
+    if mcp_servers and not kimi_mcp.exists():
+        json_write(kimi_mcp, {"mcpServers": render_kimi_mcp(mcp_servers)})
+    opencode_dir = USER_DIR / ".opencode-hub"
+    opencode_dir.mkdir(mode=0o700, exist_ok=True)
+    opencode_settings = opencode_dir / "opencode.json"
+    if not opencode_settings.exists():
+        json_write(opencode_settings, default_opencode_config(base_url, mcp_servers))
+    muse_settings = USER_DIR / ".config/muse/settings.json"
+    if mcp_servers and not muse_settings.exists():
+        json_write(muse_settings, {"schema_version": 1, "mcpServers": render_muse_mcp(mcp_servers)})
+    for name in CLIENT_COMMANDS:
         destination = COMMANDS / name
         target = STATE / "hubctl.py"
         if destination.is_symlink() and destination.resolve() == target.resolve():
@@ -112,10 +410,13 @@ def install_tailscale_login(launch_dir, logs, start=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--client", action="store_true", help="install an exported laptop client")
+    parser.add_argument("--client", action="store_true", help="install an exported client bundle")
+    parser.add_argument("--helpers", action="store_true", help="update hubctl and client wrappers without rebuilding or restarting the proxy")
     parser.add_argument("--no-start", action="store_true", help="prepare service without loading launchd")
     args = parser.parse_args()
-    if sys.platform != "darwin" and not args.client:
+    if args.client and args.helpers:
+        parser.error("--client and --helpers are mutually exclusive")
+    if sys.platform != "darwin" and not args.client and not args.helpers:
         parser.error("the server installer requires macOS")
     os.umask(0o077)
     for directory in (CONFIG, STATE, COMMANDS):
@@ -126,9 +427,23 @@ def main():
     runtime = "#!" + sys.executable + "\n" + runtime.split("\n", 1)[1]
     private_write(STATE / "hubctl.py", runtime, 0o700)
     private_write(STATE / "install.py", (HERE / "install.py").read_text(), 0o700)
+    bundled_mcp = HERE / "mcp-servers.json"
+    if bundled_mcp.exists():
+        mcp_text = bundled_mcp.read_text()
+        private_write(STATE / "mcp-servers.json", mcp_text, 0o600)
+        if not (CONFIG / "mcp-servers.json").exists():
+            private_write(CONFIG / "mcp-servers.json", mcp_text, 0o600)
     if args.client:
         install_clients(json.loads((HERE / "client.json").read_text()))
-        print(f"Installed claude-hub, codex-hub and hubctl in {COMMANDS}")
+        print(f"Installed {', '.join(CLIENT_COMMANDS)} in {COMMANDS}")
+        print("Next: run `hubctl status` and `hubctl sync-clients` to sync all live hub models and default MCP servers.")
+        return
+    if args.helpers:
+        client_path = CONFIG / "client.json"
+        if not client_path.exists():
+            raise SystemExit(f"Missing existing client configuration: {client_path}")
+        install_clients(json.loads(client_path.read_text()))
+        print(f"Updated {', '.join(CLIENT_COMMANDS)} in {COMMANDS}")
         return
     binary_dir = STATE / "bin"
     binary_dir.mkdir(mode=0o700, exist_ok=True)
@@ -211,7 +526,7 @@ def main():
         else:
             subprocess.run(["launchctl", "bootstrap", domain, str(plist_path)], check=True)
     print(f"Installed native Mini hub. Config: {config_path}")
-    print("Commands: hubctl status, hubctl login claude, hubctl login codex, claude-hub, codex-hub")
+    print(f"Commands: {', '.join(CLIENT_COMMANDS)}")
 
 
 if __name__ == "__main__":

@@ -52,23 +52,74 @@ configuration are retained.
 ```sh
 claude-hub
 codex-hub
+grok-hub
+gemini-hub
+agy-hub
+kimi-hub
+opencode-hub
+muse-hub
+hubctl run <command> [args...]
 hubctl status
 hubctl models
+hubctl mcp
+hubctl sync-clients
 hubctl restart
 ```
 
-The wrappers use `~/.claude-hub` and `~/.codex-hub`. Claude preferences are copied
-on first installation; histories remain separate. Codex's isolated config uses
-the Responses protocol, WebSockets, and an environment-supplied hub key, as
-described in the [official Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
-The wrappers inject credentials only into their child processes. The normal
-`claude` and `codex` commands keep their existing login and configuration.
+The isolated wrappers use `~/.claude-hub`, `~/.codex-hub`, `~/.grok-hub`,
+`~/.gemini-hub`, `~/.kimi-hub`, and `~/.opencode-hub` so your normal CLIs keep
+their existing logins and histories. Claude preferences are copied on first
+installation. Codex uses Responses + WebSockets with `CLIPROXY_API_KEY`; Grok
+uses `GROK_XAI_API_BASE_URL` / `GROK_MODELS_BASE_URL` + `XAI_API_KEY`; Gemini
+uses `GOOGLE_GEMINI_BASE_URL` + `GEMINI_API_KEY`; Kimi (`kimi-code`) uses
+`KIMI_CODE_HOME` + `KIMI_API_KEY` (`type = "openai"`); OpenCode exposes all
+active hub provider groups (`claude`, `codex`, `antigravity`/`gemini`, `xai`,
+`kimi`, `meta`, etc.) via `{env:CLIPROXY_API_KEY}`; Muse Code (`muse-hub`)
+injects `META_API_KEY` and per-run `-c endpoint_transport.base_url=...` /
+`-c endpoint_transport.auth="bearer"` overrides without modifying
+`~/.config/muse/settings.json` or `XDG_CONFIG_HOME`. `hubctl run <command>`
+injects hub environment variables for all providers (including OpenAI,
+Anthropic, Gemini, xAI, Kimi, and Meta/Muse SDKs) directly into a child process
+without printing keys.
 
-Repeat `hubctl login codex` or `hubctl login claude` for additional accounts.
-Finish each OAuth login in the browser using the desired account. For Codex,
-the helper also enables the credential's **upstream** `websockets` flag; enabling
-only the client's `supports_websockets` setting is insufficient in this release.
-Use `hubctl enable-websockets` after adding Codex credentials through another UI.
+Antigravity CLI (`agy`) always reads `~/.gemini/antigravity-cli/settings.json`
+rather than a separate config directory. Opt into hub routing on a machine with
+`hubctl agy-mode hub` (sets `"modelProvider": "gemini"`), then launch `agy-hub`.
+Switch back to native Google sign-in anytime with `hubctl agy-mode account`.
+
+Default MCP servers live in `~/.config/cliproxyapi-mini/mcp-servers.json`
+(seeded from `scripts/mini-hub/mcp-servers.json` and included in `export-client`
+bundles; inspect with `hubctl mcp`). Run `hubctl sync-clients` after adding new
+providers, editing `mcp-servers.json`, or changing the hub URL to populate
+`~/.opencode-hub/opencode.json` and `~/.kimi-hub/config.toml` from `/v1/models`,
+keep `~/.codex-hub/config.toml` in sync, and non-destructively merge the
+default MCP servers into every client CLI (`claude-hub`, `codex-hub`,
+`grok-hub`, `gemini-hub`, `kimi-hub`, `opencode-hub`, `muse-hub` via
+`~/.config/muse/settings.json`, and Antigravity
+`~/.gemini/config/mcp_config.json`).
+
+Add any built-in provider on the Mini hub with `hubctl login <provider>`:
+
+```sh
+hubctl login claude
+hubctl login codex          # add --browser for browser OAuth instead of device flow
+hubctl login antigravity
+hubctl login xai
+hubctl login kimi-ai        # or: hubctl login kimi
+hubctl login meta
+hubctl login copilot
+hubctl login devin
+hubctl import-vertex /path/to/service-account.json
+```
+
+All login commands also accept `--no-browser`, `--oauth-callback-port <port>`,
+and `--login-proxy <url>`. For Codex, the helper automatically enables the
+credential's **upstream** `websockets` flag; enabling only the client's
+`supports_websockets` setting is insufficient in this release. Use
+`hubctl enable-websockets` after adding Codex credentials through another UI.
+
+To update only `hubctl` and the client wrappers on the Mini without rebuilding
+or restarting the running proxy service, run `python3 scripts/mini-hub/install.py --helpers`.
 
 Open `/management.html` on the local or Tailscale hub URL for account and quota
 management. `hubctl copy-management-key` copies the management password to the
@@ -77,31 +128,44 @@ field. `hubctl copy-api-key` copies the separate client access key. Clear the
 clipboard after use if appropriate. The management key grants full account
 administration; do not include it in client exports.
 
-## Connect a laptop or iPhone
+## Connect other Tailscale machines (macOS, Linux, iPhone)
 
-Install Tailscale on each device and sign in to the same tailnet. For a laptop,
-create a private client bundle on the Mini:
+Install Tailscale on each device and sign in to the same tailnet. Keep all
+upstream OAuth grants on the Mini hub only — never copy `~/.cli-proxy-api/` to
+client machines. For each macOS or Linux machine, create a private client
+bundle with its own dedicated access key:
 
 ```sh
-hubctl export-client ~/mini-hub-client
+hubctl export-client ~/mini-hub-macbook --name macbook
 ```
 
-Transfer that directory privately to the laptop. It contains the **access key**,
-but no upstream OAuth grants or management key. On the laptop, install Python
-and the normal Claude/Codex CLIs, then run:
+Using `--name <machine>` registers a separate key in `access.api-keys` on the
+hub so each machine can be audited (`hubctl clients`) or revoked individually
+(`hubctl revoke-client macbook`) without affecting other devices. Omitting
+`--name` exports the primary access key.
+
+Transfer that directory privately to the client machine. It contains only the
+client **access key** — no upstream OAuth grants or management key. On the
+client machine, install Python 3.9+ and whichever CLIs you want to use, then run:
 
 ```sh
-cd mini-hub-client
+cd mini-hub-macbook
 python3 install.py --client
+hubctl sync-clients
 hubctl status
 claude-hub
 codex-hub
+grok-hub
+gemini-hub
+kimi-hub
+opencode-hub
 ```
 
-Run `hubctl status` from that laptop to verify the complete remote network path.
-Delete the transfer copy after installation; the installed private configuration
-still contains the access key. The exported helper supports macOS and Linux
-clients; the native server installer requires macOS.
+Run `hubctl status` from that machine to verify the complete remote network
+path and see every model provider served by the hub. Delete the transfer copy
+after installation; the installed private configuration still contains the
+access key. The exported helper supports macOS and Linux clients; the native
+server installer requires macOS.
 
 On iPhone, connect Tailscale and open the hub's `/management.html` in Safari.
 Claude Code and Codex still run on the Mini or laptop. An app such as T3 Code
@@ -149,8 +213,10 @@ its separate password, SQLite storage, daily backups, and restart checks.
 | Path | Purpose |
 | --- | --- |
 | `~/.config/cliproxyapi-mini/config.yaml` | Effective v8 server configuration; contains the client key and hashed management secret |
-| `~/.config/cliproxyapi-mini/secrets.json` | Original API and management keys, plus the private remote URL |
+| `~/.config/cliproxyapi-mini/secrets.json` | Original API, management, and named client keys, plus the private remote URL |
 | `~/.config/cliproxyapi-mini/client.json` | This machine's endpoint and API key |
+| `~/.config/cliproxyapi-mini/mcp-servers.json` | Default MCP servers synced across all client CLIs and exported bundles |
+| `~/.claude-hub/`, `~/.codex-hub/`, `~/.grok-hub/`, `~/.gemini-hub/`, `~/.kimi-hub/`, `~/.opencode-hub/` | Isolated per-CLI client directories (no plaintext keys stored) |
 | `~/.cli-proxy-api/` | Upstream OAuth grants; private to the Mini |
 | `~/.local/share/cliproxyapi-mini/` | Installed binary, helpers, and rotating logs |
 | `~/Library/LaunchAgents/com.vahaah.cliproxyapi-mini.plist` | Per-user launchd service |
