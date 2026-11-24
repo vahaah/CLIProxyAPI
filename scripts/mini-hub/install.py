@@ -14,6 +14,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
 import urllib.request
 
 
@@ -44,6 +48,7 @@ DEFAULT_KIMI_MODELS = (
     "kimi-k2.5",
 )
 TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+TOML_MCP_SECTION_RE = re.compile(r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\]$')
 
 
 def private_write(path, content, mode=0o600):
@@ -86,6 +91,80 @@ def load_mcp_servers():
             if isinstance(servers, dict):
                 return servers
     return {}
+
+
+def read_toml_mcp_transports(path):
+    """Read only transport fields (url / command+args) for [mcp_servers.*]; never read env/secrets."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    text = path.read_text()
+    transports = {}
+    if tomllib is not None:
+        try:
+            parsed = tomllib.loads(text)
+        except Exception:
+            parsed = {}
+        mcp_table = parsed.get("mcp_servers")
+        if isinstance(mcp_table, dict):
+            for name, entry in mcp_table.items():
+                if not isinstance(entry, dict):
+                    continue
+                if isinstance(entry.get("command"), str) and entry["command"]:
+                    spec = {"command": entry["command"]}
+                    if isinstance(entry.get("args"), list):
+                        spec["args"] = [str(item) for item in entry["args"]]
+                    transports[name] = spec
+                elif isinstance(entry.get("url"), str) and entry["url"]:
+                    transports[name] = {"url": entry["url"]}
+        return transports
+    current = None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            match = TOML_MCP_SECTION_RE.match(stripped)
+            current = (match.group(1) or match.group(2)) if match else None
+            continue
+        if current is None:
+            continue
+        for key in ("command", "args", "url"):
+            m = re.match(rf"^{key}\s*=\s*(.+)$", stripped)
+            if not m:
+                continue
+            try:
+                value = json.loads(m.group(1).strip())
+            except Exception:
+                continue
+            entry = transports.setdefault(current, {})
+            if key == "args" and isinstance(value, list):
+                entry["args"] = [str(item) for item in value]
+            elif key in ("command", "url") and isinstance(value, str) and value:
+                entry[key] = value
+    return {
+        name: ({"command": e["command"], **({"args": e["args"]} if e.get("args") else {})} if e.get("command") else {"url": e["url"]})
+        for name, e in transports.items()
+        if e.get("command") or e.get("url")
+    }
+
+
+def resolve_codex_mcp_servers(servers, native_codex_path):
+    """Align transport with ~/.codex/config.toml so trusting $HOME never mixes url and command."""
+    native = read_toml_mcp_transports(native_codex_path)
+    if not native:
+        return servers
+    resolved = {}
+    for name, spec in servers.items():
+        if not isinstance(spec, dict) or name not in native:
+            resolved[name] = spec
+            continue
+        native_spec = native[name]
+        if bool(native_spec.get("command")) != bool(spec.get("command")) or bool(native_spec.get("url")) != bool(spec.get("url")):
+            resolved[name] = native_spec
+        else:
+            resolved[name] = spec
+    return resolved
 
 
 def render_toml_mcp_blocks(servers, include_enabled=False):
@@ -338,7 +417,8 @@ def install_clients(client):
             "stream_max_retries = 1",
             "",
         ])
-        mcp_toml = render_toml_mcp_blocks(mcp_servers, include_enabled=False)
+        codex_mcp_servers = resolve_codex_mcp_servers(mcp_servers, USER_DIR / ".codex/config.toml")
+        mcp_toml = render_toml_mcp_blocks(codex_mcp_servers, include_enabled=False)
         if mcp_toml:
             codex_text += "\n" + mcp_toml + "\n"
         private_write(codex_settings, codex_text)

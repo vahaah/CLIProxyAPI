@@ -12,6 +12,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
 import urllib.error
 import urllib.request
 
@@ -491,6 +495,143 @@ def merge_kimi_config(path, base_url, model_ids):
     return True
 
 
+def read_toml_mcp_transports(path):
+    """Read only transport fields (url / command+args) for [mcp_servers.*]; never read env/secrets."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    text = path.read_text()
+    transports = {}
+    if tomllib is not None:
+        try:
+            parsed = tomllib.loads(text)
+        except Exception:
+            parsed = {}
+        mcp_table = parsed.get("mcp_servers")
+        if isinstance(mcp_table, dict):
+            for name, entry in mcp_table.items():
+                if not isinstance(entry, dict):
+                    continue
+                if isinstance(entry.get("command"), str) and entry["command"]:
+                    spec = {"command": entry["command"]}
+                    if isinstance(entry.get("args"), list):
+                        spec["args"] = [str(item) for item in entry["args"]]
+                    transports[name] = spec
+                elif isinstance(entry.get("url"), str) and entry["url"]:
+                    transports[name] = {"url": entry["url"]}
+        return transports
+    current = None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            match = TOML_MCP_SECTION_RE.match(stripped)
+            current = (match.group(1) or match.group(2)) if match else None
+            continue
+        if current is None:
+            continue
+        for key in ("command", "args", "url"):
+            m = re.match(rf"^{key}\s*=\s*(.+)$", stripped)
+            if not m:
+                continue
+            try:
+                value = json.loads(m.group(1).strip())
+            except Exception:
+                continue
+            entry = transports.setdefault(current, {})
+            if key == "args" and isinstance(value, list):
+                entry["args"] = [str(item) for item in value]
+            elif key in ("command", "url") and isinstance(value, str) and value:
+                entry[key] = value
+    return {
+        name: ({"command": e["command"], **({"args": e["args"]} if e.get("args") else {})} if e.get("command") else {"url": e["url"]})
+        for name, e in transports.items()
+        if e.get("command") or e.get("url")
+    }
+
+
+def resolve_codex_mcp_servers(servers, native_codex_path):
+    """Align transport with ~/.codex/config.toml so trusting $HOME never mixes url and command."""
+    native = read_toml_mcp_transports(native_codex_path)
+    if not native:
+        return servers
+    resolved = {}
+    for name, spec in servers.items():
+        if not isinstance(spec, dict) or name not in native:
+            resolved[name] = spec
+            continue
+        native_spec = native[name]
+        if bool(native_spec.get("command")) != bool(spec.get("command")) or bool(native_spec.get("url")) != bool(spec.get("url")):
+            resolved[name] = native_spec
+        else:
+            resolved[name] = spec
+    return resolved
+
+
+def reconcile_codex_mcp_conflicts(codex_hub_path, native_codex_path):
+    """Fix existing [mcp_servers.*] entries in ~/.codex-hub/config.toml whose transport conflicts with ~/.codex/config.toml."""
+    codex_hub_path = Path(codex_hub_path)
+    if not codex_hub_path.exists():
+        return 0
+    native = read_toml_mcp_transports(native_codex_path)
+    if not native:
+        return 0
+    lines = codex_hub_path.read_text().splitlines(keepends=True)
+    sections = []
+    current_header = None
+    current_body = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            sections.append((current_header, current_body))
+            current_header = line
+            current_body = []
+        else:
+            current_body.append(line)
+    sections.append((current_header, current_body))
+
+    reconciled = 0
+    out_lines = []
+    for header, body in sections:
+        if header is None:
+            out_lines.extend(body)
+            continue
+        match = TOML_MCP_SECTION_RE.match(header.strip())
+        name = (match.group(1) or match.group(2)) if match else None
+        if not name or name not in native:
+            out_lines.append(header)
+            out_lines.extend(body)
+            continue
+        native_spec = native[name]
+        has_url = any(re.match(r"^url\s*=", b.strip()) for b in body)
+        has_cmd = any(re.match(r"^command\s*=", b.strip()) for b in body)
+        want_cmd = bool(native_spec.get("command"))
+        want_url = bool(native_spec.get("url"))
+        if (want_cmd and has_url) or (want_url and has_cmd):
+            filtered = [
+                b for b in body
+                if not re.match(r"^(url|command|args)\s*=", b.strip())
+            ]
+            replacement = []
+            if want_cmd:
+                replacement.append("command = " + json.dumps(native_spec["command"]) + "\n")
+                if native_spec.get("args"):
+                    replacement.append("args = " + json.dumps(list(native_spec["args"])) + "\n")
+            else:
+                replacement.append("url = " + json.dumps(native_spec["url"]) + "\n")
+            out_lines.append(header)
+            out_lines.extend(replacement)
+            out_lines.extend(filtered)
+            reconciled += 1
+        else:
+            out_lines.append(header)
+            out_lines.extend(body)
+    if reconciled:
+        write_private_text(codex_hub_path, "".join(out_lines))
+    return reconciled
+
+
 def merge_toml_mcp_servers(path, servers, include_enabled=False, header=None):
     existing_text = path.read_text() if path.exists() else ""
     existing_names = set()
@@ -636,9 +777,13 @@ def sync_mcp_servers(servers):
         format_claude_mcp_entry,
         skip_names=claude_enabled_plugin_names(),
     )
-    counts["codex-hub"] = merge_toml_mcp_servers(
-        USER_DIR / ".codex-hub/config.toml",
-        servers,
+    native_codex_cfg = USER_DIR / ".codex/config.toml"
+    codex_hub_cfg = USER_DIR / ".codex-hub/config.toml"
+    codex_reconciled = reconcile_codex_mcp_conflicts(codex_hub_cfg, native_codex_cfg)
+    codex_servers = resolve_codex_mcp_servers(servers, native_codex_cfg)
+    counts["codex-hub"] = codex_reconciled + merge_toml_mcp_servers(
+        codex_hub_cfg,
+        codex_servers,
         include_enabled=False,
     )
     counts["grok-hub"] = merge_toml_mcp_servers(

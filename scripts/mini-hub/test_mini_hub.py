@@ -466,6 +466,56 @@ class MiniHubHelpersTest(unittest.TestCase):
                 self.assertIn("1456", commands[-1])
                 self.assertEqual(ws_mock.call_count, 2)
 
+    def test_codex_hub_aligns_conflicting_mcp_transport_with_native_codex_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = home / ".config/cliproxyapi-mini"
+            state = home / ".local/share/cliproxyapi-mini"
+            config.mkdir(parents=True)
+            state.mkdir(parents=True)
+            (config / "mcp-servers.json").write_text((ROOT / "mcp-servers.json").read_text())
+
+            native_codex = home / ".codex/config.toml"
+            native_codex.parent.mkdir(parents=True)
+            native_text = (
+                "[mcp_servers.context7]\n"
+                'command = "npx"\n'
+                'args = ["-y", "@upstash/context7-mcp"]\n\n'
+                "[mcp_servers.context7.env]\n"
+                'SECRET_TOKEN = "do-not-copy"\n\n'
+                "[mcp_servers.linear]\n"
+                'url = "https://mcp.linear.app/mcp"\n'
+            )
+            native_codex.write_text(native_text)
+
+            # 1. Existing conflicting HTTP entry in ~/.codex-hub/config.toml is reconciled cleanly.
+            codex_hub = home / ".codex-hub/config.toml"
+            codex_hub.parent.mkdir(parents=True)
+            codex_hub.write_text(
+                'model_provider = "cliproxy"\n\n'
+                "[mcp_servers.context7]\n"
+                'url = "https://mcp.context7.com/mcp"\n'
+                "startup_timeout_sec = 45\n"
+            )
+            with patch.multiple(HUBCTL, USER_DIR=home, CONFIG=config, STATE=state):
+                HUBCTL.sync_mcp_servers(HUBCTL.load_mcp_servers())
+
+            updated = codex_hub.read_text()
+            self.assertIn('[mcp_servers.context7]\ncommand = "npx"\nargs = ["-y", "@upstash/context7-mcp"]\nstartup_timeout_sec = 45', updated)
+            self.assertNotIn("https://mcp.context7.com/mcp", updated)
+            self.assertNotIn("do-not-copy", updated)
+            self.assertEqual(native_codex.read_text(), native_text)
+
+            # 2. Fresh install also picks the matching stdio transport directly.
+            codex_hub.unlink()
+            (home / ".local/bin").mkdir(parents=True, exist_ok=True)
+            with patch.multiple(INSTALLER, HERE=ROOT, USER_DIR=home, CONFIG=config, STATE=state, COMMANDS=home / ".local/bin"):
+                INSTALLER.install_clients({"base_url": "http://127.0.0.1:8317", "api_key": "tok"})
+            fresh = codex_hub.read_text()
+            self.assertIn('[mcp_servers.context7]\ncommand = "npx"\nargs = ["-y", "@upstash/context7-mcp"]', fresh)
+            self.assertNotIn("https://mcp.context7.com/mcp", fresh)
+            self.assertNotIn("do-not-copy", fresh)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
