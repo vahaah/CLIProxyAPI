@@ -72,6 +72,23 @@ func translateCodexRequestPairWithUpdateIntentContext(ctx context.Context, from,
 // Codex backend accepts; smaller integers are rejected with invalid_request_error.
 const codexMinOutputTokens = 16
 
+// shouldPreserveFullCodexOpenAIInclude reports whether the target Codex upstream
+// is a non-ChatGPT OpenAI Responses API endpoint (SIWC or custom codex-api-key)
+// that should preserve the full official OpenAI ResponseIncludable set in
+// addition to Codex's opt-in output.encrypted_content.
+func shouldPreserveFullCodexOpenAIInclude(ctx context.Context, auth *cliproxyauth.Auth, baseURL string, headers http.Header) bool {
+	if !codexUseSIWCForRequest(ctx, auth, headers) && !codexAuthUsesAPIKey(auth) {
+		return false
+	}
+	return !helps.IsChatGPTCodexBackendBaseURL(baseURL)
+}
+
+// normalizeCodexOutputBudgetDoc raises small positive integer output budgets to the
+// Codex minimum. It judges the translated payload (max_output_tokens) rather than the
+// client payload so every source format and budget field (max_tokens,
+// max_completion_tokens, generation_config, ...) is covered uniformly. Budgets that
+// are missing, non-numeric, non-integral, or <= 0 are left untouched for the upstream
+// to reject. This runs before user payload rules so overrides and filters stay final.
 func normalizeCodexOutputBudgetDoc(doc *ojson.Doc) {
 	if doc == nil {
 		return
@@ -189,6 +206,9 @@ func (e *CodexExecutor) cacheHelperDoc(ctx context.Context, from sdktranslator.F
 	var rawJSON []byte
 	if doc != nil {
 		rawJSON = doc.Bytes()
+	}
+	if errMarker := helps.ValidateCodexSessionInstructionMarker(rawJSON, from); errMarker != nil {
+		return nil, nil, errMarker
 	}
 	wireBody := rawJSON
 	if e.cfg != nil && e.cfg.Codex.UpstreamRequestCompression && auth != nil &&
@@ -871,6 +891,9 @@ func resolveCodexGPTImage2BaseModel(cfg *config.Config) string {
 	return model
 }
 
+// normalizeCodexImageGenerationToolsDoc strips parameters rejected by the
+// hosted image_generation tool on Codex /responses (which binds to
+// gpt-image-2-codex and rejects the complexity parameter).
 func normalizeCodexImageGenerationToolsDoc(doc *ojson.Doc) bool {
 	if doc == nil {
 		return false

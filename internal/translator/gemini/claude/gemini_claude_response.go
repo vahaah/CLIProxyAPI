@@ -616,8 +616,8 @@ func ConvertGeminiResponseToClaude(_ context.Context, _ string, originalRequestR
 						p.HasVisibleOutput = true
 					}
 				}
-				if partText != "" {
-					// Preserve native part boundaries for signatures that may arrive later.
+				if hasThoughtSignature && partText != "" {
+					// Keep explicitly signed text parts isolated from subsequent unsigned text.
 					appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, p.ResponseIndex))
 					p.ResponseIndex++
 					p.ResponseType = 0
@@ -636,7 +636,9 @@ func ConvertGeminiResponseToClaude(_ context.Context, _ string, originalRequestR
 		}
 	}
 
-	if finish := ojson.GetBytesNoCopy(rawJSON, "candidates.0.finishReason"); finish.Exists() && finish.String() != "" {
+	finish := ojson.GetBytesNoCopy(rawJSON, "candidates.0.finishReason")
+	hasFinishReason := finish.Type == ojson.String && strings.TrimSpace(finish.String()) != ""
+	if hasFinishReason {
 		(*param).(*Params).FinishReason = strings.Clone(finish.String())
 		flushPendingToolInput()
 	}
@@ -672,7 +674,7 @@ func ConvertGeminiResponseToClaude(_ context.Context, _ string, originalRequestR
 		return [][]byte{output}
 	}
 
-	if usageResult.Exists() && bytes.Contains(rawJSON, []byte(`"finishReason"`)) && !(*param).(*Params).HasFinalEvents && p.ActiveToolCall == nil && !p.HasIncompleteToolCall {
+	if usageResult.Exists() && hasFinishReason && !(*param).(*Params).HasFinalEvents && p.ActiveToolCall == nil && !p.HasIncompleteToolCall {
 		if !(*param).(*Params).HasContent && (*param).(*Params).HasFirstResponse {
 			appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, (*param).(*Params).ResponseIndex))
 			(*param).(*Params).ResponseType = 1
@@ -876,7 +878,9 @@ func ConvertGeminiResponseToClaudeNonStream(_ context.Context, _ string, origina
 					hasVisibleOutput = true
 				}
 				lastSignatureTarget = translatorcommon.GeminiClaudeCarrierText
-				flushText()
+				if partSig != "" {
+					flushText()
+				}
 				continue
 			}
 
